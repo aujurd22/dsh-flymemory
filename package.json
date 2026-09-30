@@ -51,7 +51,7 @@
     "url": "https://github.com/aujurd22/dsh-flymemory/issues"
   },
   "scripts": {
-    "test": "node --test \"tests/**/*.test.mjs\"",
+    "test": "node tests/run.mjs",
     "check": "node --check lib/index.js && node --check bin/flymemory.mjs",
     "smoke": "node tests/engine_smoke.mjs"
   },

@@ -227,7 +227,7 @@ files move in both directions.
 
 ```bash
 node --check lib/index.js        # syntax
-node --test tests/               # unit tests: config, hooks config, endpoint probing
+npm test                         # unit tests (node tests/run.mjs): config, hooks, probing
 node tests/engine_smoke.mjs      # full engine round trip (needs torch + sentence-transformers)
 python tests/http_smoke.py       # protocol-level smoke against a live endpoint
 ```

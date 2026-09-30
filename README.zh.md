@@ -196,7 +196,7 @@ dsh-flymemory doctor     # 解释器、依赖、端点、路径、安装提示
 
 ```bash
 node --check lib/index.js        # 语法
-node --test tests/               # 单元测试：配置、钩子配置、端点探测
+npm test                         # 单元测试（node tests/run.mjs）：配置、钩子、端点探测
 node tests/engine_smoke.mjs      # 引擎全链路（需要 torch + sentence-transformers）
 python tests/http_smoke.py       # 协议级冒烟（对着运行中的端点）
 ```

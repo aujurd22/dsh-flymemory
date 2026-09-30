@@ -15,6 +15,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         node: ['20', '22']
+        include:
+          # Newest supported Node on one platform: `node --test` argument
+          # handling changed between 20, 22 and 24.
+          - os: ubuntu-latest
+            node: '24'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,7 +30,7 @@ jobs:
           node --check lib/index.js
           node --check bin/flymemory.mjs
       - name: Unit tests
-        run: node --test "tests/**/*.test.mjs"
+        run: node tests/run.mjs
       - name: Bundle manifest is installable
         run: node -e "const p=require('./package.json'); if(!p.dsh?.bundle?.patch) throw new Error('missing dsh.bundle.patch'); if(!p.main) throw new Error('missing main'); console.log('manifest ok:', p.name, p.version)"
 
