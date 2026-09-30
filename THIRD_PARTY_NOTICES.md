@@ -1,0 +1,39 @@
+# Third-party notices
+
+`dsh-flymemory` is MIT licensed (see [LICENSE](LICENSE)). It bundles a copy of
+the FlyMemory engine so the plugin works without a separate checkout.
+
+## FlyMemory (vendored engine)
+
+- Upstream project: <https://github.com/aujurd22/flymemory>
+- License: MIT — Copyright (c) 2026 Junrong Du
+- Vendored under [`python/`](python/)
+
+### Files copied byte for byte
+
+| Vendored path | Upstream path |
+|---|---|
+| `python/flymemory/v3.py` | `flymemory/v3.py` |
+| `python/flymemory/encoder.py` | `flymemory/encoder.py` |
+| `python/flymemory/hopfield.py` | `flymemory/hopfield.py` |
+| `python/flymemory/memory_store.py` | `flymemory/memory_store.py` |
+| `python/flymemory/__init__.py` | `flymemory/__init__.py` |
+
+### Files copied with adaptations
+
+| Vendored path | Upstream path | Change |
+|---|---|---|
+| `python/flymemory_server.py` | `flymemory/mcp_v3.py` | Runtime paths became configurable (`--data-dir`, `--db`, `--host`, `--port`, `--write-pid-file`), so the library, logs and pid file no longer sit next to the code — an installed package may be a read-only copy. No tool behaviour changed. |
+| `python/hook_auto.py` | `flymemory/hook_auto.py` | The endpoint moved from a hard-coded URL to `--url` → `FLYMEMORY_MCP_URL` → built-in default. |
+| `python/hook_compact.py` | `flymemory/hook_compact.py` | Same endpoint change. |
+
+The upstream MIT notice above applies to all of these files. If you only want
+the plugin without a vendored engine, point the row's `scriptPath` at your own
+FlyMemory checkout instead (`FLYMEMORY_ENGINE` is not used; use the row config).
+
+## DeepSeek Harness packages
+
+`@deepseek-ai/dsh-mcp-client` and `@deepseek-ai/dsh-hooks-claude-code` are
+referenced by module name only. They ship with DeepSeek Harness and resolve from
+the dsh installation, so this package declares no dependency on them and
+redistributes none of their code.

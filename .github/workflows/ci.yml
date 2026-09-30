@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  node:
+    name: Node (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Syntax check
+        run: |
+          node --check lib/index.js
+          node --check bin/flymemory.mjs
+      - name: Unit tests
+        run: node --test "tests/**/*.test.mjs"
+      - name: Bundle manifest is installable
+        run: node -e "const p=require('./package.json'); if(!p.dsh?.bundle?.patch) throw new Error('missing dsh.bundle.patch'); if(!p.main) throw new Error('missing main'); console.log('manifest ok:', p.name, p.version)"
+
+  python:
+    name: Python syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Byte-compile the vendored engine
+        run: python -m compileall -q python
+      - name: Endpoint resolution honours --url and the environment
+        run: |
+          python - <<'PY'
+          import os, subprocess, sys, json, pathlib
+          script = pathlib.Path('python/hook_auto.py')
+          env = dict(os.environ, FLYMEMORY_MCP_URL='http://127.0.0.1:9/mcp')
+          # The hook is a silent no-op when the service is down; it must exit 0.
+          result = subprocess.run(
+              [sys.executable, str(script)],
+              input=json.dumps({'prompt': 'ci probe'}),
+              text=True, capture_output=True, env=env, timeout=60,
+          )
+          assert result.returncode == 0, result.stderr
+          print('hook exits 0 with the service down: ok')
+          PY

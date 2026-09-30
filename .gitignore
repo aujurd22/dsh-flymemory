@@ -1,0 +1,21 @@
+# dependencies
+node_modules/
+
+# python bytecode
+__pycache__/
+*.py[cod]
+
+# runtime data: the memory library never belongs in git
+*.pkl
+data/
+tests/.data/
+
+# engine logs written into a custom data dir
+*.log
+server.pid
+
+# editor / OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

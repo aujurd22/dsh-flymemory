@@ -1,0 +1,7 @@
+# Normalize line endings: the repository is cross-platform, so keep LF in the
+# object store regardless of the checkout platform.
+* text=auto eol=lf
+
+# Binary-ish assets that must never be normalized.
+*.svg text
+*.pkl binary

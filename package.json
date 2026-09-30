@@ -1,0 +1,63 @@
+{
+  "name": "dsh-flymemory",
+  "version": "1.0.0",
+  "description": "Private long-term memory for DeepSeek Harness: 15 FlyMemory MCP tools, automatic recall/capture hooks, and a supervised local engine on its own port and store.",
+  "type": "module",
+  "main": "lib/index.js",
+  "bin": {
+    "dsh-flymemory": "bin/flymemory.mjs"
+  },
+  "icon": "./icon.svg",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "lib",
+    "bin",
+    "python",
+    "locale",
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md",
+    "README.zh.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "dsh-bundle",
+    "memory",
+    "long-term-memory",
+    "agent-memory",
+    "mcp",
+    "flymemory"
+  ],
+  "author": "Junrong Du",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aujurd22/dsh-flymemory.git"
+  },
+  "homepage": "https://github.com/aujurd22/dsh-flymemory#readme",
+  "bugs": {
+    "url": "https://github.com/aujurd22/dsh-flymemory/issues"
+  },
+  "scripts": {
+    "test": "node --test \"tests/**/*.test.mjs\"",
+    "check": "node --check lib/index.js && node --check bin/flymemory.mjs",
+    "smoke": "node tests/engine_smoke.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

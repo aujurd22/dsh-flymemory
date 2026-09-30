@@ -1,0 +1,49 @@
+# dsh-flymemory bundle patch — three rows, applied on top of the shipped
+# composition when this bundle is selected in the profile.
+#
+#   1. flymemory         starts (or reuses) this plugin's own FlyMemory MCP
+#                        service and regenerates the hook config.
+#   2. flymemory-mcp     bridges the service's 15 tools into the tool registry
+#                        as `mcp__flymemory__<tool>`.
+#   3. flymemory-hooks   runs FlyMemory's auto-capture / recall-injection hooks
+#                        through the Claude-Code hook bridge.
+#
+# Storage is independent by design:
+#   * port 8791, chosen so this never shares an endpoint with the FlyMemory HTTP
+#     service other clients use on 8765;
+#   * the library lives at $DSH_HOME/flymemory-data/flymemory_v3.pkl;
+#   * nothing is imported from another installation unless `upstreamLibrary` is
+#     set on the `flymemory` row (seedFromUpstream stays false).
+#
+# Override any of it before starting the harness (all three rows follow these):
+#   FLYMEMORY_MCP_PORT   service port                 (default 8791)
+#   FLYMEMORY_MCP_URL    full endpoint URL            (default http://127.0.0.1:<port>/mcp)
+#   FLYMEMORY_DATA_DIR   library/log directory        (default $DSH_HOME/flymemory-data)
+#   FLYMEMORY_PYTHON     interpreter with torch + sentence-transformers
+
+- insert:
+    - id: flymemory
+      name: 'dsh-flymemory'
+      config:
+        port: !!js "Number(process.env.FLYMEMORY_MCP_PORT || 8791)"
+        # Explicit even though it is the default: this plugin owns its store.
+        seedFromUpstream: false
+
+    - id: flymemory-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: flymemory
+        transport: streamable-http
+        url: !!js "process.env.FLYMEMORY_MCP_URL || `http://127.0.0.1:${process.env.FLYMEMORY_MCP_PORT || 8791}/mcp`"
+        toolCallTimeoutMs: 120000
+        reconnect:
+          enabled: true
+          initialDelayMs: 1000
+          maxDelayMs: 15000
+          maxAttempts: 60
+
+    - id: flymemory-hooks
+      name: '@deepseek-ai/dsh-hooks-claude-code'
+      config:
+        configPath: !!js "dshHomePath('flymemory-data/hooks.json')"
+        defaultTimeoutMs: 30000
