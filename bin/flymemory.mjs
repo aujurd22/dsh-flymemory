@@ -32,7 +32,6 @@ const flag = (name, fallback = undefined) => {
   const index = argv.indexOf(name)
   return index === -1 ? fallback : argv[index + 1]
 }
-const has = (name) => argv.includes(name)
 
 const config = {}
 if (flag('--port')) config.port = Number(flag('--port'))
@@ -136,7 +135,7 @@ function logCommand() {
   process.exit(0)
 }
 
-function doctor() {
+async function doctor() {
   console.log('dsh-flymemory doctor\n')
   const problems = []
   if (!info.pythonExe) problems.push('no Python interpreter found — set FLYMEMORY_PYTHON or the row\'s pythonExe')
@@ -152,8 +151,13 @@ function doctor() {
       console.log(`    "${info.pythonExe}" -m pip install torch sentence-transformers "mcp>=1.30,<2" numpy`)
     }
   }
+  const live = await probeEndpoint(info.url, 4000)
+  console.log(`\nendpoint: ${info.url}`)
+  console.log(`  ${live.ok ? `answers with ${live.tools.length} tools` : `not reachable (${live.error})`}`)
+  if (live.ok && !live.tools.some((tool) => tool.startsWith('flymemory_'))) {
+    problems.push('the port answers but publishes no flymemory_ tools — another program is using it')
+  }
   console.log(`\ndata dir: ${info.dataDir}`)
-  if (has('--endpoint')) console.log(`endpoint: ${info.url} → ${JSON.stringify(probeEndpoint(info.url, 4000))}`)
   if (problems.length === 0) {
     console.log('\nno problems found.')
     process.exit(0)

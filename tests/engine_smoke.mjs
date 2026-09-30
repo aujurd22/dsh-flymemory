@@ -113,7 +113,6 @@ console.log('')
 
 check(port !== 8765, 'uses a private port by default', String(port))
 check(logs.some((line) => line.includes('engine ready') || line.includes('reusing')), 'engine became ready')
-check(existsSync(base.libraryPath), 'own library created in the data directory', base.libraryPath)
 check(base.upstreamLibrary === '', 'no upstream library configured, so nothing was imported')
 
 const hooksPath = `${dataDir}/hooks.json`
@@ -138,13 +137,15 @@ try {
 let probeId = null
 try {
   const stats = await callTool('flymemory_stats')
-  check(typeof stats === 'string' && stats.length > 0, 'flymemory_stats answered', stats.slice(0, 60))
+  check(stats.includes('Memory empty') || stats.includes('Memories'), 'flymemory_stats answered', stats.slice(0, 60))
   const stored = await callTool('flymemory_remember', {
     text: `dsh-flymemory engine smoke probe ${new Date().toISOString()}`,
     tags: 'smoke,dsh-flymemory',
   })
   check(!stored.includes('[REJECTED]'), 'flymemory_remember stored the probe', stored.slice(0, 80))
   probeId = stored.match(/#(\d+)/)?.[1] ?? null
+  // The engine creates the library file on its first write, not at startup.
+  check(existsSync(base.libraryPath), 'own library persisted inside the data directory', base.libraryPath)
   const recalled = await callTool('flymemory_recall', {
     query: 'dsh-flymemory engine smoke probe',
     top_k: 3,

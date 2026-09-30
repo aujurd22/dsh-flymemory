@@ -189,12 +189,17 @@ anywhere.
 
 ## CLI
 
+From a checkout, run `node bin/flymemory.mjs <command>`. Once the bundle is
+installed, the same CLI is linked into the profile
+(`<profile>/node_modules/.bin/dsh-flymemory`), so `npx dsh-flymemory <command>`
+or that path works from anywhere.
+
 ```bash
 dsh-flymemory status     # resolved config, live endpoint, tool count, bundle selection
 dsh-flymemory start      # start the service now (detached)
 dsh-flymemory stop       # stop the process recorded in server.pid
 dsh-flymemory log -n 40  # tail engine.log and server.log
-dsh-flymemory doctor     # interpreter, dependencies, paths, install hints
+dsh-flymemory doctor     # interpreter, dependencies, endpoint, paths, install hints
 ```
 
 Accepted by every command: `--port`, `--host`, `--data-dir`, `--library`,

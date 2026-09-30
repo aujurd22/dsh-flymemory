@@ -162,12 +162,16 @@ plugin_manager(action: "set_plugin", target: "include:flymemory-hooks", enabled:
 
 ## 命令行
 
+在源码目录里跑 `node bin/flymemory.mjs <命令>`；装成 bundle 之后同一个 CLI 会被
+链接进 profile（`<profile>/node_modules/.bin/dsh-flymemory`），所以
+`npx dsh-flymemory <命令>` 或直接用它也可以。
+
 ```bash
 dsh-flymemory status     # 解析后的配置、实时端点、工具数、bundle 选中状态
 dsh-flymemory start      # 立刻启动服务（分离进程）
 dsh-flymemory stop       # 按 server.pid 停止
 dsh-flymemory log -n 40  # tail engine.log 与 server.log
-dsh-flymemory doctor     # 解释器、依赖、路径、安装提示
+dsh-flymemory doctor     # 解释器、依赖、端点、路径、安装提示
 ```
 
 每个命令都接受 `--port`、`--host`、`--data-dir`、`--library`、`--python`。
