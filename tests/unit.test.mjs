@@ -47,11 +47,11 @@ describe('resolveOptions', () => {
   it('defaults to a private port and a private library', () => {
     const options = resolveOptions({}, env())
     assert.equal(options.port, DEFAULT_PORT)
-    assert.notEqual(options.port, 8765, 'must not default to the shared FlyMemory port')
+    assert.notEqual(options.port, 8765, 'must not default to a port a separate service may hold')
     assert.equal(options.host, '127.0.0.1')
     assert.equal(options.libraryPath, join(HOME, '.dsh', 'flymemory-data', 'flymemory_v3.pkl'))
     assert.equal(options.dataDir, join(HOME, '.dsh', 'flymemory-data'))
-    assert.equal(options.seedFromUpstream, false, 'must not import another installation by default')
+    assert.equal(options.seedFromUpstream, false, 'must not import a library by default')
     assert.equal(options.upstreamLibrary, '')
     assert.equal(options.autostart, true)
     assert.equal(options.writeHooksConfig, true)
@@ -106,7 +106,7 @@ describe('resolveOptions', () => {
     }
   })
 
-  it('imports nothing from another installation by default', () => {
+  it('starts with its own empty store by default', () => {
     const options = resolveOptions({}, env())
     assert.equal(options.upstreamLibrary, '')
     assert.equal(options.seedFromUpstream, false)

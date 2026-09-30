@@ -111,7 +111,7 @@ console.log(`apply() returned after ${Date.now() - started}ms`)
 for (const line of logs) console.log(`   ${line}`)
 console.log('')
 
-check(port !== 8765, 'uses a private port by default', String(port))
+check(port !== 8765, "uses the plugin's own port", String(port))
 check(logs.some((line) => line.includes('engine ready') || line.includes('reusing')), 'engine became ready')
 check(base.upstreamLibrary === '', 'no upstream library configured, so nothing was imported')
 

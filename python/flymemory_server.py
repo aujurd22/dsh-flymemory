@@ -10,7 +10,7 @@ Configurable, flag first then environment then default:
   --data-dir DIR   library/log directory   FLYMEMORY_DATA_DIR   <plugin>/data
   --db PATH        library file            FLYMEMORY_DB         <data-dir>/flymemory_v3.pkl
   --host HOST      bind host               FLYMEMORY_HOST       127.0.0.1
-  --port N         http port               FLYMEMORY_PORT       8765
+  --port N         http port               FLYMEMORY_PORT       8791
 
 Tools:
   flymemory_remember(text, tags) → store (auto-dedup via semantic similarity)
@@ -20,7 +20,7 @@ Tools:
 
 两种运行模式：
   python flymemory_server.py            → stdio（默认，行为与上游一致）
-  python flymemory_server.py --http     → streamable-http 常驻服务（127.0.0.1:8765/mcp），
+  python flymemory_server.py --http     → streamable-http 常驻服务（127.0.0.1:8791/mcp），
                                           所有会话共享一份模型与记忆，连接毫秒级；
                                           端口已被占用时直接退出（幂等，适合开机自启）。
 """
@@ -58,9 +58,9 @@ DB_PATH = os.path.abspath(
     os.path.join(DATA_DIR, "flymemory_v3.pkl"))
 HTTP_HOST = _early_option("--host") or os.environ.get("FLYMEMORY_HOST") or "127.0.0.1"
 try:
-    HTTP_PORT = int(_early_option("--port") or os.environ.get("FLYMEMORY_PORT") or 8765)
+    HTTP_PORT = int(_early_option("--port") or os.environ.get("FLYMEMORY_PORT") or 8791)
 except ValueError:
-    HTTP_PORT = 8765
+    HTTP_PORT = 8791
 
 # --http 常驻模式：尽早把日志落文件（pythonw 下 stderr 本为 None），
 # 必须赶在 sentence_transformers/transformers 导入之前，否则它们的 logger 绑定到旧流。
@@ -116,8 +116,8 @@ def save_memory():
 
 from mcp.server.fastmcp import FastMCP
 
-# stateless_http=True：不跟踪会话，每个请求自包含——服务重启不会使已连接的
-# ZCode 会话失效（否则报 Session not found 且客户端不会自动重连）。
+# stateless_http=True：不跟踪会话，每个请求自包含——服务重启不会让已连接的
+# 客户端失效（否则报 Session not found 且客户端不会自动重连）。
 mcp = FastMCP("flymemory", host=HTTP_HOST, port=HTTP_PORT, stateless_http=True, instructions="""
 FlyMemory v3: long-term memory for AI agents — chunked storage, hybrid
 recall (multilingual embeddings + IDF lexical boost for exact identifiers),

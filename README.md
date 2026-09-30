@@ -2,139 +2,144 @@
 
 English | [中文](README.zh.md)
 
-**Private long-term memory for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).**
-A DSH plugin (bundle) that gives the harness its own [FlyMemory](https://github.com/aujurd22/flymemory)
-instance: 15 memory tools, automatic recall and capture hooks, and a supervised
-local engine — on its **own port** and its **own library file**, so it never
-mixes with another FlyMemory installation.
+Long-term memory for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
+
+This is a plugin (a DSH *bundle*) that runs [FlyMemory](https://github.com/aujurd22/flymemory)
+as a local MCP service and plugs it into the harness. You end up with 15 memory
+tools, plus a pair of hooks that quietly record what you've been working on and
+pull the relevant bits back when they matter — so you stop re-explaining the same
+context every session.
+
+Everything stays on your machine. The service listens on `127.0.0.1:8791`, the
+library is a single file under your DSH home, and nothing is sent anywhere.
 
 ```
-DSH session ──┬── mcp__flymemory__flymemory_*   15 tools, model-driven memory
-              └── hooks                            automatic recall + capture
+DSH session ──┬── mcp__flymemory__*   15 tools the model can call
+              └── hooks               recall before a turn, store after it
                         │
                         ▼
-              FlyMemory MCP service on 127.0.0.1:8791
+              FlyMemory service on 127.0.0.1:8791
                         │
                         ▼
               $DSH_HOME/flymemory-data/flymemory_v3.pkl
 ```
 
-## Why
+## What you get
 
-FlyMemory keeps a durable, searchable memory of decisions, findings and entity
-state across sessions. Its own MCP server already works with any MCP client, but
-wiring it into a harness by hand means running a second service, choosing a port,
-registering hooks and keeping all of that alive. This plugin does that part:
+Fifteen tools, all under the `mcp__flymemory__` prefix:
 
-- **Independent storage.** Port `8791` and `$DSH_HOME/flymemory-data/flymemory_v3.pkl`.
-  The FlyMemory HTTP service other tools use (usually port `8765`) is never
-  touched, and no library is imported unless you ask for it.
-- **Zero-config.** Install the bundle; the engine starts with the harness and the
-  tools appear as `mcp__flymemory__*`.
-- **Automatic memory.** Hooks capture each prompt and inject relevant memories
-  into the turn, so the model does not have to remember to remember.
-- **No dependencies.** The plugin imports nothing from `@deepseek-ai/*` and
-  declares no npm dependencies; the two DSH rows it uses ship with the harness.
+| Tool | What it's for |
+|---|---|
+| `flymemory_remember` | Store a decision or finding. Near-duplicates are merged automatically. `compartment` groups entries by topic; `state_key`/`state_value` track "the current value of X" and retire the old one. |
+| `flymemory_recall` | Search. Dense embeddings and keyword matching are fused, older entries fade, and results come back with id, age and where they came from. `include_superseded` digs into history. |
+| `flymemory_auto` | Recall and store in one call. This is what the hooks use. |
+| `flymemory_recall_index` / `flymemory_get_memory` | Look first, read later: a one-line index, then the full text of whatever looks interesting. |
+| `flymemory_supersede` | Say "this old entry is out of date, that one replaces it". |
+| `flymemory_state_lookup` / `flymemory_state_history` | Current value for an entity key, or the whole history of it. |
+| `flymemory_consolidate` | Fold several entries into one conclusion; the originals stay as evidence. |
+| `flymemory_find_conflicts` / `flymemory_insights` | Pairs that look contradictory; valuable entries that are fading. |
+| `flymemory_forget` / `flymemory_cleanup` | Delete one entry, or sweep everything that has decayed past a threshold. |
+| `flymemory_session_pack` | A short pack of the recent trail and the latest conclusions. |
+| `flymemory_stats` | Counts, ages, access counts. |
+
+And two hooks that work on their own:
+
+- **On every prompt** — the prompt is stored, and memories that match it get
+  appended to the turn. No model call, just local search.
+- **On session start** — a recovery pack of recent activity, so a fresh session
+  isn't starting from nothing.
+
+Both hooks are silent when the service is down, and neither can block a turn.
 
 ## Requirements
 
-| | |
-|---|---|
-| DeepSeek Harness | A build shipping `@deepseek-ai/dsh-mcp-client` and `@deepseek-ai/dsh-hooks-claude-code` (developed against `0.2.0-rc.2`). |
-| Node | 20 or newer (for the plugin and its CLI). |
-| Python | 3.10+ with `torch`, `sentence-transformers`, `mcp>=1.30,<2`, `numpy`. |
-| Disk / network | The multilingual embedder (`paraphrase-multilingual-MiniLM-L12-v2`, ~470 MB) is downloaded once into the HuggingFace cache, then everything runs offline. |
+- DeepSeek Harness with `@deepseek-ai/dsh-mcp-client` and
+  `@deepseek-ai/dsh-hooks-claude-code` available. Built and tested against
+  `0.2.0-rc.2`.
+- Node 20+ (the add-on and its CLI).
+- Python 3.10+ with the engine's dependencies:
 
-```bash
-pip install torch sentence-transformers "mcp>=1.30,<2" numpy
-```
+  ```bash
+  pip install torch sentence-transformers "mcp>=1.30,<2" numpy
+  ```
 
-The plugin finds the interpreter automatically (`pythonExe`/`FLYMEMORY_PYTHON`,
-then the usual install locations, then `PATH`) and verifies that
-`sentence_transformers` is importable before choosing one. `dsh-flymemory doctor`
-shows what it picked and fixes the usual problems.
+  The plugin finds the interpreter for you: it checks `FLYMEMORY_PYTHON`, the
+  usual install locations, then `PATH`, and it verifies that
+  `sentence_transformers` actually imports before picking one. On a machine with
+  several Pythons that saves you the "why won't it start" half hour.
+
+  The first run downloads the multilingual embedding model (~470 MB) into the
+  HuggingFace cache. After that it works offline.
 
 ## Install
 
-From a checkout, with the absolute path to this package directory:
+Point `plugin_manager` at this directory (absolute path):
 
 ```
 plugin_manager(action: "install_bundle", target: "/absolute/path/to/dsh-flymemory")
 ```
 
-or the Web sidebar's **Plugins** page, selecting this directory. Installation
-adds the package to the profile and selects the bundle; the harness reloads and
-three rows become active (`flymemory`, `flymemory-mcp`, `flymemory-hooks`).
+Or use the **Plugins** page in the Web sidebar and pick the folder. The harness
+reloads, three rows come up (`flymemory`, `flymemory-mcp`, `flymemory-hooks`),
+and the tools appear.
 
-Verify:
+Check it:
 
 ```bash
-dsh-flymemory status      # endpoint, library, interpreter, bundle selection
-dsh-flymemory doctor      # interpreter + dependency check
+node bin/flymemory.mjs status     # what it resolved, and what's live
+node bin/flymemory.mjs doctor     # interpreter, dependencies, endpoint
 ```
 
-Then ask the harness to store something (`mcp__flymemory__flymemory_remember`)
-and recall it (`mcp__flymemory__flymemory_recall`).
+Then ask the model to remember something and search for it. If the tools don't
+show up, `doctor` usually says why.
 
-To remove it again:
+Removing it is the same in reverse:
 
 ```
 plugin_manager(action: "remove_bundle", target: "dsh-flymemory")
 ```
 
-## What you get
+Your memory file is not deleted — remove it by hand if you want it gone.
 
-| Tool (`mcp__flymemory__…`) | Purpose |
-|---|---|
-| `flymemory_remember` | Store a finding or decision. Semantic dedup merges near-duplicates; `compartment` scopes a domain; `state_key`/`state_value` record entity state and mechanically supersede the older value. |
-| `flymemory_recall` | Hybrid recall — dense embeddings fused with IDF lexical ranking (RRF), decay-weighted, with id/age/source stamps. `include_superseded` reaches history. |
-| `flymemory_auto` | One call: recall for the current context **and** store it when novel. This is what the hooks use. |
-| `flymemory_recall_index` / `flymemory_get_memory` | Progressive disclosure: cheap one-line index first, full text on demand. |
-| `flymemory_supersede` | Mark an outdated memory as replaced (judgement by the calling model). |
-| `flymemory_state_lookup` / `flymemory_state_history` | Current value for an entity key / full history of that key. |
-| `flymemory_consolidate` | Fold related memories into one higher-order conclusion, keeping the raw entries as evidence. |
-| `flymemory_find_conflicts` / `flymemory_insights` | Candidate contradictions; high-value entries about to fade. |
-| `flymemory_forget` / `flymemory_cleanup` | Targeted deletion; decay-threshold forgetting. |
-| `flymemory_session_pack` | Recent working trail + newest conclusions (the recovery pack). |
-| `flymemory_stats` | Size, age, access counts, average decay weight. |
+## How it runs
 
-## How it works
+The bundle inserts three rows:
 
-The bundle patch inserts three rows:
-
-| Row | Module | Role |
+| Row | Module | Job |
 |---|---|---|
-| `flymemory` | this package | Probes the port; reuses a FlyMemory service already there, starts the vendored engine otherwise; writes the hook config. |
-| `flymemory-mcp` | `@deepseek-ai/dsh-mcp-client` | Bridges the service's tools into the registry as `mcp__flymemory__<tool>`. |
-| `flymemory-hooks` | `@deepseek-ai/dsh-hooks-claude-code` | Runs `hook_auto.py` (per prompt) and `hook_compact.py` (per session start). |
+| `flymemory` | this package | Probes the port, starts the engine if nothing is there, writes the hook config |
+| `flymemory-mcp` | `@deepseek-ai/dsh-mcp-client` | Turns the service's tools into `mcp__flymemory__<tool>` |
+| `flymemory-hooks` | `@deepseek-ai/dsh-hooks-claude-code` | Runs the two hook scripts on the right events |
 
-Activation order and failure handling:
+When the harness starts, the first row checks `127.0.0.1:8791`. If a FlyMemory
+service is already answering there, it's reused — two harness windows share one
+engine and one library. If the port is free, the bundled engine starts in the
+background and the row waits for it before letting the next row connect. If
+something else owns the port, the plugin says so and leaves it alone; it never
+kills a process it didn't start.
 
-1. `flymemory` probes `host:port`. If a service there answers `tools/list` with
-   `flymemory_*` tools it is reused — several harness processes share one engine
-   and one library. A port held by something else is reported, never overwritten.
-2. Otherwise the vendored engine starts detached with `--http`, its stdio logged
-   to `<dataDir>/engine.log`, and the row waits (default 25 s) until the port
-   answers, so the next row connects on its first attempt.
-3. If the engine cannot start (no interpreter, missing dependency, occupied
-   port), the harness still boots: the tools simply do not appear, the reason is
-   in the log, and the mcp-client row keeps retrying with backoff.
+Cold starts are slow: the engine imports torch before it can listen, which takes
+15–20 seconds. The row waits up to 25 seconds by default, and the mcp-client
+reconnects on its own if it has to.
 
-## Configuration
+If the engine can't start at all — no interpreter, missing dependency, port
+conflict — the harness still boots. You just don't get the tools, and the reason
+is in the log.
+
+## Settings
 
 Environment variables, read before the harness starts:
 
-| Variable | Default | Meaning |
+| Variable | Default | |
 |---|---|---|
-| `FLYMEMORY_MCP_PORT` | `8791` | Service port. |
-| `FLYMEMORY_MCP_URL` | `http://127.0.0.1:<port>/mcp` | Full endpoint. |
-| `FLYMEMORY_DATA_DIR` | `$DSH_HOME/flymemory-data` | Library, logs, hook config, pid file. |
-| `FLYMEMORY_PYTHON` | auto-detected | Interpreter for the engine. |
-| `FLYMEMORY_DEVICE` / `FLYMEMORY_MODEL` | `cpu` / multilingual MiniLM | Passed through to the engine. |
+| `FLYMEMORY_MCP_PORT` | `8791` | Service port |
+| `FLYMEMORY_MCP_URL` | `http://127.0.0.1:<port>/mcp` | Full endpoint |
+| `FLYMEMORY_DATA_DIR` | `$DSH_HOME/flymemory-data` | Library, logs, hook config, pid file |
+| `FLYMEMORY_PYTHON` | auto-detected | Interpreter for the engine |
+| `FLYMEMORY_DEVICE` / `FLYMEMORY_MODEL` | `cpu` / multilingual MiniLM | Passed to the engine |
 
-Row config (higher priority than the environment), for your profile's
-`cordis.patch.yml` — a patch entry replaces the whole `config`, so restate what
-you need:
+Anything else goes on the row itself, in your profile's `cordis.patch.yml`. A
+patch entry replaces the whole `config`, so write out everything you need:
 
 ```yaml
 - id: flymemory
@@ -145,70 +150,60 @@ you need:
     libraryPath: 'D:\dsh-memory\my-lib.pkl'
     pythonExe: 'C:\Python313\python.exe'
     device: cpu
-    readinessTimeoutMs: 25000   # 0 = start DSH immediately, tools appear later
-    shutdownOnDispose: true     # kill the engine this activation started
+    readinessTimeoutMs: 25000   # 0 = don't wait, let the tools show up later
+    shutdownOnDispose: true     # stop the engine this activation started
     writeHooksConfig: true
-    seedFromUpstream: false     # never import another installation implicitly
-    upstreamLibrary: ''         # set both to import an existing library once
+    seedFromUpstream: false     # don't import another library implicitly
+    upstreamLibrary: ''         # set both to import one, once
     autostart: true
 ```
 
-| Option | Default | Meaning |
-|---|---|---|
-| `port` / `host` / `mcpPath` / `mcpUrl` | `8791` / `127.0.0.1` / `/mcp` / derived | Endpoint. |
-| `dataDir` / `libraryPath` | `$DSH_HOME/flymemory-data` / `<dataDir>/flymemory_v3.pkl` | Files this plugin owns. |
-| `pythonExe` / `verifyInterpreter` | auto-detect / `true` | Interpreter selection. |
-| `scriptPath` | `<package>/python/flymemory_server.py` | Use your own FlyMemory checkout instead of the vendored engine. |
-| `seedFromUpstream` / `upstreamLibrary` | `false` / `''` | One-time import of another library (the source is copied, never moved). |
-| `autostart` | `true` | Start the engine when nothing answers. |
-| `writeHooksConfig` | `true` | Regenerate `<dataDir>/hooks.json` on every activation. |
-| `shutdownOnDispose` | `true` | Stop the engine if this activation started it. |
-| `readinessTimeoutMs` / `connectTimeoutMs` / `probeTimeoutMs` | `25000` / `600` / `4000` | Timing. |
-| `device` / `model` | engine defaults | `FLYMEMORY_DEVICE` / `FLYMEMORY_MODEL` for the child. |
+The rest of the options are documented in `resolveOptions()` in
+[lib/index.js](lib/index.js). Unknown keys are ignored.
 
-## Privacy: the hooks write, and you should know it
+## Where your memory lives
 
-The `flymemory-hooks` row is **on by default**, because automatic memory is the
-point of the plugin. It does two things:
+`$DSH_HOME/flymemory-data/flymemory_v3.pkl` — one file, plain data, easy to back
+up or delete. Alongside it:
 
-- `UserPromptSubmit` stores every user prompt (`source=hook`, unjudged) and
-  appends recalled memories to the turn (roughly 1.5 KB of context per turn).
-- `SessionStart` injects a recovery pack of the recent working trail.
+- `hooks.json` — regenerated on every activation; describes the two hooks
+- `engine.log` — stdout/stderr of the engine process
+- `server.log` — the engine's own log
+- `server.pid` — so `flymemory stop` knows what to kill
 
-Everything lands in this plugin's own library. To run with the tools only:
+To run the service on its own, without the harness:
+
+```bash
+node bin/flymemory.mjs start
+node bin/flymemory.mjs stop
+node bin/flymemory.mjs log -n 40
+```
+
+After installing the bundle, the same CLI is linked into the profile at
+`<profile>/node_modules/.bin/dsh-flymemory`.
+
+## About the hooks
+
+They're on by default, because automatic memory is the whole point of the thing.
+Worth knowing exactly what that means:
+
+- Every prompt you send is written to the memory file. It's local and cheap, but
+  it is a record of what you typed.
+- Recalled memories are appended to the turn, which costs some context — in
+  practice around 1.5 KB per turn.
+- Credential-shaped text never gets stored: the engine rejects things like
+  `ghp_`, `github_pat_`, `sk-ant-`, `AKIA` and private key headers.
+
+If you'd rather have the tools and no automation:
 
 ```
 plugin_manager(action: "set_plugin", target: "include:flymemory-hooks", enabled: false)
 ```
 
-Credential-shaped content is refused before it is stored (the upstream filter
-covers `ghp_`, `github_pat_`, `sk-ant-`, `sk-proj-`, `AKIA`, `xoxb`, private-key
-headers, …), hooks never block a turn and exit 0 on any error. Memory is plain
-files on your machine: `<dataDir>/flymemory_v3.pkl` plus logs. Nothing is sent
-anywhere.
+## Importing a library you already have
 
-## CLI
-
-From a checkout, run `node bin/flymemory.mjs <command>`. Once the bundle is
-installed, the same CLI is linked into the profile
-(`<profile>/node_modules/.bin/dsh-flymemory`), so `npx dsh-flymemory <command>`
-or that path works from anywhere.
-
-```bash
-dsh-flymemory status     # resolved config, live endpoint, tool count, bundle selection
-dsh-flymemory start      # start the service now (detached)
-dsh-flymemory stop       # stop the process recorded in server.pid
-dsh-flymemory log -n 40  # tail engine.log and server.log
-dsh-flymemory doctor     # interpreter, dependencies, endpoint, paths, install hints
-```
-
-Accepted by every command: `--port`, `--host`, `--data-dir`, `--library`,
-`--python`.
-
-## Importing an existing FlyMemory library
-
-The plugin keeps its store separate on purpose. If you do want to move an
-existing library in, do it once and explicitly:
+Nothing is imported unless you ask. If you have a FlyMemory library from
+somewhere else and want to move it in, point the plugin at it once:
 
 ```yaml
 - id: flymemory
@@ -219,57 +214,56 @@ existing library in, do it once and explicitly:
     seedFromUpstream: true
 ```
 
-On the next activation the file is copied to `libraryPath` if it is not there
-yet; the source is left in place. The library format is the upstream schema, so
-files move in both directions.
+On the next activation the file is copied into place if the target doesn't exist
+yet. The original is left alone. The format is the same in both directions, so
+you can move it back out later.
 
-## Development
+## Working on it
 
 ```bash
-node --check lib/index.js        # syntax
-npm test                         # unit tests (node tests/run.mjs): config, hooks, probing
-node tests/engine_smoke.mjs      # full engine round trip (needs torch + sentence-transformers)
-python tests/http_smoke.py       # protocol-level smoke against a live endpoint
+node --check lib/index.js    # syntax
+npm test                     # unit tests, no Python needed, ~0.3 s
+node tests/engine_smoke.mjs  # end-to-end against the real engine (needs torch)
+python tests/http_smoke.py   # protocol check against a running service
 ```
 
-`engine_smoke.mjs` runs the real `apply()` in a throwaway data directory, so it
-never touches your memory; it prints SKIP when no suitable interpreter exists.
-CI runs the syntax check and the unit tests on Linux, macOS and Windows.
-
-Layout:
+`npm test` covers the parts that are easy to get wrong: port and library
+defaults, config precedence, the generated hook file, endpoint probing. The
+engine smoke test runs `apply()` in a throwaway directory against a real Python
+engine — it needs torch and sentence-transformers, and prints SKIP if they aren't
+there. CI runs the syntax check and the unit tests on Linux, macOS and Windows
+across Node 20, 22 and 24.
 
 ```
 lib/index.js        Host half: port probing, engine supervision, hook config
-bin/flymemory.mjs   CLI over the same helpers
+bin/flymemory.mjs   CLI built on the same helpers
 cordis.patch.yml    the three rows this bundle inserts
-python/             vendored FlyMemory engine (server + hooks + engine package)
-locale/{en,zh}.json Plugins-page title and description
+python/             vendored FlyMemory engine (server, hooks, engine package)
+locale/{en,zh}.json title and description for the Plugins page
 tests/              unit tests, engine smoke test, protocol smoke test
 ```
 
-## Limitations
+## Rough edges
 
-- **Cold start is slow.** Importing torch takes ~15–20 s before the engine opens
-  its port; the first activation waits for it. Reusing an already running service
-  is instant. Set `readinessTimeoutMs: 0` to skip the wait.
-- **Heavy Python dependency.** The engine needs torch and sentence-transformers.
-  The plugin does not install them for you; `doctor` tells you what is missing.
-- **DSH has no `PreCompact`/`PostCompact` hook.** The recovery pack therefore
-  runs on `SessionStart` instead of immediately after compaction.
-- **Long tool names.** `mcp__flymemory__flymemory_recall` is the mcp-client
-  naming contract (`mcp__<serverName>__<rawName>`), stable but not short.
-- **One engine per port.** Concurrent harnesses share it; a second engine would
-  need a second port and a second library, configured explicitly.
-- **Recall cost grows with the library.** Upstream benchmarks measured ~11 ms per
-  query at ~1 400 entries; a much larger store is slower per query.
-- Built and tested against DeepSeek Harness `0.2.0-rc.2`. The plugin only uses two
-  shipped rows and imports no harness code, so harness upgrades should not need
-  changes here — but the rows' config schemas are the harness's to change.
+- **The first start takes 15–20 seconds.** That's torch loading. Set
+  `readinessTimeoutMs: 0` if you'd rather the harness start immediately and have
+  the tools appear a few seconds later.
+- **The Python dependencies are heavy.** The plugin won't install them for you;
+  `doctor` tells you what's missing.
+- **DSH has no `PreCompact` hook**, so the recovery pack runs at session start
+  rather than right after a compaction.
+- **Tool names are long.** `mcp__flymemory__flymemory_recall` is what the
+  mcp-client naming rule produces — `mcp__<server>__<tool>` — and it's stable,
+  just not pretty.
+- **One engine per port.** Two harnesses share it; a third instance needs its own
+  port and its own library, set explicitly.
+- **Recall gets slower as the library grows.** Upstream measured ~11 ms per query
+  at about 1,400 entries on CPU.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
 
-The vendored FlyMemory engine is MIT, Copyright (c) 2026 Junrong Du; see
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the exact file list and the
-adaptations made.
+The bundled FlyMemory engine is MIT as well, Copyright (c) 2026 Junrong Du.
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) lists exactly which files were
+copied, which were adapted, and why.

@@ -7,14 +7,14 @@ them back as additionalContext. Silent no-op on any error (never blocks the
 session).
 
 Copied from upstream `flymemory/hook_compact.py`; only the endpoint became
-configurable (`--url`, then FLYMEMORY_MCP_URL, then the 8765 default).
+configurable (`--url`, then FLYMEMORY_MCP_URL, then the built-in default).
 """
 import json
 import os
 import sys
 import urllib.request
 
-DEFAULT_URL = "http://127.0.0.1:8765/mcp"
+DEFAULT_URL = "http://127.0.0.1:8791/mcp"
 
 
 def _resolve_url() -> str:

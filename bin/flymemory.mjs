@@ -73,7 +73,7 @@ const tail = (path, lines) => {
 async function status() {
   console.log('dsh-flymemory status')
   console.log(`  endpoint        ${info.url}`)
-  console.log(`  port            ${info.port}  (default ${DEFAULT_PORT}; the shared FlyMemory service usually uses 8765)`)
+  console.log(`  port            ${info.port}  (default ${DEFAULT_PORT})`)
   console.log(`  data dir        ${info.dataDir}`)
   console.log(`  library         ${info.libraryPath}  ${info.libraryExists ? `[${megabytes(info.libraryPath)}]` : '[not created yet]'}`)
   console.log(`  interpreter     ${info.pythonExe || 'NOT FOUND'}${info.pythonExe ? (info.pythonVerified ? '  (sentence_transformers available)' : '  (sentence_transformers NOT found)') : ''}`)

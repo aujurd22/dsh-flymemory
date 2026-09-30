@@ -8,12 +8,11 @@
 #   3. flymemory-hooks   runs FlyMemory's auto-capture / recall-injection hooks
 #                        through the Claude-Code hook bridge.
 #
-# Storage is independent by design:
-#   * port 8791, chosen so this never shares an endpoint with the FlyMemory HTTP
-#     service other clients use on 8765;
-#   * the library lives at $DSH_HOME/flymemory-data/flymemory_v3.pkl;
-#   * nothing is imported from another installation unless `upstreamLibrary` is
-#     set on the `flymemory` row (seedFromUpstream stays false).
+# The plugin keeps its memory to itself:
+#   * its own service port (8791 by default);
+#   * its own library at $DSH_HOME/flymemory-data/flymemory_v3.pkl;
+#   * nothing imported from anywhere unless `upstreamLibrary` is set on the
+#     `flymemory` row (seedFromUpstream stays false).
 #
 # Override any of it before starting the harness (all three rows follow these):
 #   FLYMEMORY_MCP_PORT   service port                 (default 8791)

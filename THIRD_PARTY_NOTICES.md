@@ -23,8 +23,8 @@ the FlyMemory engine so the plugin works without a separate checkout.
 
 | Vendored path | Upstream path | Change |
 |---|---|---|
-| `python/flymemory_server.py` | `flymemory/mcp_v3.py` | Runtime paths became configurable (`--data-dir`, `--db`, `--host`, `--port`, `--write-pid-file`), so the library, logs and pid file no longer sit next to the code — an installed package may be a read-only copy. No tool behaviour changed. |
-| `python/hook_auto.py` | `flymemory/hook_auto.py` | The endpoint moved from a hard-coded URL to `--url` → `FLYMEMORY_MCP_URL` → built-in default. |
+| `python/flymemory_server.py` | `flymemory/mcp_v3.py` | Runtime paths became configurable (`--data-dir`, `--db`, `--host`, `--port`, `--write-pid-file`), so the library, logs and pid file no longer sit next to the code — an installed package may be a read-only copy. The built-in fallback port is 8791 instead of 8765, matching this project; the plugin always passes `--port` explicitly, so the fallback only matters when you run the server by hand. No tool behaviour otherwise. |
+| `python/hook_auto.py` | `flymemory/hook_auto.py` | The endpoint moved from a hard-coded URL to `--url` → `FLYMEMORY_MCP_URL` → built-in default (8791). |
 | `python/hook_compact.py` | `flymemory/hook_compact.py` | Same endpoint change. |
 
 The upstream MIT notice above applies to all of these files. If you only want

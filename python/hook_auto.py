@@ -1,8 +1,8 @@
-"""DSH UserPromptSubmit hook：把每条用户消息机械转发给 flymemory 常驻服务。
+"""DSH UserPromptSubmit hook：把每条用户消息转发给常驻的 flymemory 服务。
 
-上游版本（flymemory/hook_auto.py）用于 ZCode；本副本只把端点从硬编码改为
-可配置（`--url` 优先，其次环境变量 FLYMEMORY_MCP_URL，最后仍是 8765 默认值），
-其余逻辑逐字保留。dsh-flymemory 生成 hooks.json 时会把 `--url` 写进命令行。
+上游 `flymemory/hook_auto.py` 的副本，唯一改动是端点不再写死：`--url` 优先，
+其次环境变量 FLYMEMORY_MCP_URL，最后才是内置默认值。其余逻辑逐字保留。
+dsh-flymemory 生成 hooks.json 时会把 `--url` 写进命令行。
 
 stdin 收 hook JSON（取 prompt 字段），POST tools/call flymemory_auto 到
 MCP 端点（stateless 模式，无需 initialize 握手），召回结果以
@@ -11,7 +11,7 @@ additionalContext 注入本轮对话。
 """
 import sys, os, json, urllib.request
 
-DEFAULT_URL = "http://127.0.0.1:8765/mcp"
+DEFAULT_URL = "http://127.0.0.1:8791/mcp"
 
 
 def _resolve_url() -> str:
