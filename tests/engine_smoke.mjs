@@ -134,37 +134,48 @@ try {
   check(false, 'tools/list succeeded', String(error))
 }
 
-let probeId = null
+const created = []
 try {
+  // Regression: `flymemory_auto` used to raise UnboundLocalError on a library
+  // that is still empty — the exact state every fresh install starts in, where
+  // the hooks then failed before storing anything.
+  const auto = await callTool('flymemory_auto', { context: 'dsh-flymemory empty-store auto probe' })
+  check(!auto.includes('Error executing tool'), 'flymemory_auto survives an empty store', auto.split('\n')[0].slice(0, 80))
+  const storedLine = auto.split('\n').find((line) => line.startsWith('STORED:')) ?? ''
+  check(storedLine.length > 0 && !storedLine.includes('[SKIPPED]'), 'flymemory_auto captured the context', storedLine.slice(0, 70))
+  created.push(...[...storedLine.matchAll(/#(\d+)/g)].map((match) => Number(match[1])))
+
   const stats = await callTool('flymemory_stats')
   check(stats.includes('Memory empty') || stats.includes('Memories'), 'flymemory_stats answered', stats.slice(0, 60))
+
   const stored = await callTool('flymemory_remember', {
     text: `dsh-flymemory engine smoke probe ${new Date().toISOString()}`,
     tags: 'smoke,dsh-flymemory',
   })
   check(!stored.includes('[REJECTED]'), 'flymemory_remember stored the probe', stored.slice(0, 80))
-  probeId = stored.match(/#(\d+)/)?.[1] ?? null
+  created.push(...[...stored.matchAll(/#(\d+)/g)].map((match) => Number(match[1])))
   // The engine creates the library file on its first write, not at startup.
   check(existsSync(base.libraryPath), 'own library persisted inside the data directory', base.libraryPath)
+
   const recalled = await callTool('flymemory_recall', {
     query: 'dsh-flymemory engine smoke probe',
     top_k: 3,
   })
   check(recalled.includes('smoke probe'), 'flymemory_recall returned the probe')
-  if (probeId) {
-    const full = await callTool('flymemory_get_memory', { memory_id: Number(probeId) })
+  if (created.length > 0) {
+    const full = await callTool('flymemory_get_memory', { memory_id: created[created.length - 1] })
     check(full.includes('smoke probe'), 'flymemory_get_memory returned the full text')
   }
 } catch (error) {
-  check(false, 'remember/recall/get_memory round trip', String(error))
+  check(false, 'auto/remember/recall/get_memory round trip', String(error))
 }
 
-if (probeId) {
+for (const id of [...new Set(created)]) {
   try {
-    const removed = await callTool('flymemory_forget', { memory_id: Number(probeId) })
-    check(removed.includes('[FORGOT'), 'flymemory_forget cleaned the probe up', removed.slice(0, 50))
+    const removed = await callTool('flymemory_forget', { memory_id: id })
+    check(removed.includes('[FORGOT'), `flymemory_forget cleaned up #${id}`, removed.slice(0, 50))
   } catch (error) {
-    check(false, 'flymemory_forget cleaned the probe up', String(error))
+    check(false, `flymemory_forget cleaned up #${id}`, String(error))
   }
 }
 

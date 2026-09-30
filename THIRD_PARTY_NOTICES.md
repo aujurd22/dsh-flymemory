@@ -31,6 +31,17 @@ The upstream MIT notice above applies to all of these files. If you only want
 the plugin without a vendored engine, point the row's `scriptPath` at your own
 FlyMemory checkout instead (`FLYMEMORY_ENGINE` is not used; use the row config).
 
+### Local fix carried in `python/flymemory_server.py`
+
+`flymemory_auto` raised `UnboundLocalError: cannot access local variable
+'recall_parts'` whenever the library was empty, because the upstream code binds
+that variable only inside the `if results:` branch. On an empty library the tool
+failed *before* storing anything, so the auto-capture path broke on exactly the
+state a fresh installation starts in. The vendored copy binds `recall_parts`
+before the branch; the behaviour on a non-empty library is unchanged. Worth
+fixing upstream as well — reported here rather than patched in the original
+project.
+
 ## DeepSeek Harness packages
 
 `@deepseek-ai/dsh-mcp-client` and `@deepseek-ai/dsh-hooks-claude-code` are

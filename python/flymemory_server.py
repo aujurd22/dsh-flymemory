@@ -487,11 +487,15 @@ def flymemory_auto(context: str, response: str = "") -> str:
         output_parts = []
 
         recalled_ids = set()
+        # Local fix (dsh-flymemory): upstream only binds `recall_parts` inside
+        # `if results:`, so this tool raised UnboundLocalError on a library that
+        # is still empty -- the exact state of a freshly installed plugin, where
+        # it then failed before storing anything. Bind it up front.
+        recall_parts = []
         # ===== RECALL: find relevant memories =====
         if mem.size > 0:
             results = mem.recall(context, top_k=3)
             if results:
-                recall_parts = []
                 for entry, sim, eff in results:
                     if sim > 0.4:  # only report meaningful matches
                         recalled_ids.add(entry.memory_id)
