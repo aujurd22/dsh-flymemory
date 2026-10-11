@@ -8,6 +8,10 @@ the FlyMemory engine so the plugin works without a separate checkout.
 - Upstream project: <https://github.com/aujurd22/flymemory>
 - License: MIT — Copyright (c) 2026 Junrong Du
 - Vendored under [`python/`](python/)
+- Synced with upstream commit `cee8c5f` (2026-10-11). Included since the first
+  import: the keyed-state write fix in `v3.py`, the dated age stamps and the
+  FORM/LESSON/aggregation guidance in the tool descriptions, and the lesson
+  channel plus low-confidence gate in `hook_auto.py`.
 
 ### Files copied byte for byte
 

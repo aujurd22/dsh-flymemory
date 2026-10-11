@@ -139,6 +139,21 @@ def flymemory_remember(text: str, tags: str = "",
 
     Auto-dedup: if semantically similar to an existing memory,
     strengthens/merges instead of creating a duplicate.
+
+    FORM RULE (P-M5T): entries must be DECLARATIVE third-person factual
+    statements ("The user's favourite editor is Zed"). Never store
+    question-answer transcripts, bracketed meta notes, or "[Correction
+    note]" shells -- answer models refuse to use them (measured: 2.6-5%
+    usage vs 100% for declarative form). Corrections of earlier wrong
+    answers: store the correct fact as a plain statement; the dedup and
+    merge path will attach it to the evidence.
+
+    LESSON RULE (P-LESSON): pitfall/lesson entries MUST (a) start with
+    their TRIGGER WORDS -- the environment/tool names whose presence
+    should recall them ("PowerShell/Git Bash: inline quoting breaks --
+    write a script file instead"), because the lexical channel is the
+    situational trigger; (b) use compartment="lessons" so the hook's
+    fixed lesson channel can inject them on every message.
     Args:
         text: The text to remember
         tags: Optional comma-separated tags
@@ -185,11 +200,23 @@ def flymemory_recall(query: str, top_k: int = 5,
     they can. If a short query returns nothing relevant, rephrase with
     more context rather than concluding the memory does not exist.
 
+    Aggregation/multi-session questions ("how many times...", totals):
+    single-shot top-5 structurally under-collects evidence. Measured
+    protocol (strict 6% -> 16%, P-ANSWER): collect wide (top-30), then
+    extract atomic facts from EACH entry VERBATIM (no inference), then
+    answer from the fact list only. Two-hop questions ("my manager's
+    spouse's employer"): extract relation triples UNFILTERED from the
+    pool -- relevance filtering deletes the second-hop evidence
+    (P-COMBO: unfiltered 100% vs filtered 75%).
+
     Args:
         query: The query text (can be partial/incomplete)
         top_k: Number of memories to return
         include_superseded: include entries marked as superseded
-        compartment: optional semantic-domain partition to scope recall
+        compartment: optional semantic-domain partition to scope recall;
+            pitfall/lesson entries belong in compartment="lessons" (the
+            hook injects a fixed top-2 of that compartment on every
+            message)
     Returns:
         Relevant memories with ids, scores, age and provenance stamps
     """
@@ -214,15 +241,17 @@ def mem_decay_pct(entry, mem):
     return dw * 100
 
 def _age_str(ts: float) -> str:
-    """记忆条目的相对年龄标注——模型据此把旧状态当'可能已过期'处理，而非当前事实。"""
+    """相对年龄+绝对日期双标注。只有相对时长时模型需要心算换算才能
+    比较新旧（实测时序混乱的成因之一）；绝对日期让"哪条更新"一眼可判。"""
     dt = time.time() - ts
+    day = time.strftime("%m-%d", time.localtime(ts))
     if dt < 90:
-        return "刚刚"
+        return f"刚刚({day})"
     if dt < 3600:
-        return f"{int(dt // 60)}分钟前"
+        return f"{int(dt // 60)}分钟前({day})"
     if dt < 86400:
-        return f"{int(dt // 3600)}小时前"
-    return f"{int(dt // 86400)}天前"
+        return f"{int(dt // 3600)}小时前({day})"
+    return f"{int(dt // 86400)}天前({day})"
 
 @mcp.tool()
 def flymemory_stats() -> str:
