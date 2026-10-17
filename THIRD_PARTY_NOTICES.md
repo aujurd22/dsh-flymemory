@@ -8,10 +8,12 @@ the FlyMemory engine so the plugin works without a separate checkout.
 - Upstream project: <https://github.com/aujurd22/flymemory>
 - License: MIT — Copyright (c) 2026 Junrong Du
 - Vendored under [`python/`](python/)
-- Synced with upstream commit `cee8c5f` (2026-10-11). Included since the first
-  import: the keyed-state write fix in `v3.py`, the dated age stamps and the
-  FORM/LESSON/aggregation guidance in the tool descriptions, and the lesson
-  channel plus low-confidence gate in `hook_auto.py`.
+- Synced with upstream working tree at `6a8d614` (2026-10-17). Included since the
+  first import: the keyed-state write fix in `v3.py`, the dated age stamps and
+  the FORM/LESSON/aggregation guidance in the tool descriptions, the lesson
+  channel plus low-confidence gate in `hook_auto.py`, and the automation-message
+  filter that was still uncommitted upstream on that date (a heartbeat prompt had
+  been shredded into 32 memory entries).
 
 ### Files copied byte for byte
 
@@ -22,6 +24,11 @@ the FlyMemory engine so the plugin works without a separate checkout.
 | `python/flymemory/hopfield.py` | `flymemory/hopfield.py` |
 | `python/flymemory/memory_store.py` | `flymemory/memory_store.py` |
 | `python/flymemory/__init__.py` | `flymemory/__init__.py` |
+| `python/flymemory/clusters.py` | `flymemory/clusters.py` |
+
+`clusters.py` is an experimental module upstream keeps deliberately outside the
+recall path (its own docstring says so); nothing in this plugin imports it. It is
+vendored only so the copied `flymemory` package is not missing a module.
 
 ### Files copied with adaptations
 
@@ -48,7 +55,8 @@ project.
 
 ## DeepSeek Harness packages
 
-`@deepseek-ai/dsh-mcp-client` and `@deepseek-ai/dsh-hooks-claude-code` are
-referenced by module name only. They ship with DeepSeek Harness and resolve from
-the dsh installation, so this package declares no dependency on them and
-redistributes none of their code.
+`@deepseek-ai/dsh-mcp-client` is referenced by module name only. It ships with
+DeepSeek Harness and resolves from the dsh installation, so this package declares
+no dependency on it and redistributes none of its code. Earlier versions of the
+plugin also used `@deepseek-ai/dsh-hooks-claude-code`; DSH 44.7 removed that
+package, and the hooks now run inside this plugin instead.

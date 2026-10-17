@@ -17,11 +17,12 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import {
-  DEFAULT_PORT,
   describe,
   ensureService,
   probeEndpoint,
   probePython,
+  readEffectiveEndpoint,
+  readState,
   resolveOptions,
   stopEngine,
 } from '../lib/index.js'
@@ -71,11 +72,25 @@ const tail = (path, lines) => {
 }
 
 async function status() {
+  // A profile patch may point the plugin somewhere other than this module's
+  // defaults. `state.json` (written on every activation) and the generated hook
+  // config are the records of what actually won; prefer them over the defaults.
+  const state = readState(info.dataDir)
+  const endpoint = state?.endpoint || readEffectiveEndpoint(info.dataDir) || info.url
+  const library = state?.libraryPath || info.libraryPath
+  const libraryExists = existsSync(library)
+  const overridden = Boolean(state && (endpoint !== info.url || library !== info.libraryPath))
+
   console.log('dsh-flymemory status')
-  console.log(`  endpoint        ${info.url}`)
-  console.log(`  port            ${info.port}  (default ${DEFAULT_PORT})`)
+  console.log(`  endpoint        ${endpoint}`)
+  if (overridden) {
+    console.log(`                  resolved by the running plugin; this checkout's default is ${info.url}`)
+    console.log('                  (a profile patch override is in effect)')
+  } else if (!state && !readEffectiveEndpoint(info.dataDir)) {
+    console.log('                  no state.json or hooks.json yet — the plugin has not activated against this data dir')
+  }
   console.log(`  data dir        ${info.dataDir}`)
-  console.log(`  library         ${info.libraryPath}  ${info.libraryExists ? `[${megabytes(info.libraryPath)}]` : '[not created yet]'}`)
+  console.log(`  library         ${library}  ${libraryExists ? `[${megabytes(library)}]` : '[not created yet]'}`)
   console.log(`  interpreter     ${info.pythonExe || 'NOT FOUND'}${info.pythonExe ? (info.pythonVerified ? '  (sentence_transformers available)' : '  (sentence_transformers NOT found)') : ''}`)
   console.log(`  engine script   ${info.scriptExists ? info.scriptPath : `MISSING (${info.scriptPath})`}`)
   console.log(`  hooks config    ${existsSync(info.hooksConfigPath) ? info.hooksConfigPath : 'not written yet'}`)
@@ -94,7 +109,7 @@ async function status() {
     console.log(`  profile         no manifest at ${profileManifest} (DSH may be running without a profile)`)
   }
 
-  const live = await probeEndpoint(info.url, 4000)
+  const live = await probeEndpoint(endpoint, 4000)
   if (live.ok) {
     console.log(`  live service     yes — ${live.tools.length} tools`)
   } else {
@@ -151,12 +166,18 @@ async function doctor() {
       console.log(`    "${info.pythonExe}" -m pip install torch sentence-transformers "mcp>=1.30,<2" numpy`)
     }
   }
-  const live = await probeEndpoint(info.url, 4000)
-  console.log(`\nendpoint: ${info.url}`)
+  // Probe the endpoint the plugin really uses: a profile patch may override
+  // this checkout's own port, and the activation record names the winner.
+  const state = readState(info.dataDir)
+  const endpoint = state?.endpoint || readEffectiveEndpoint(info.dataDir) || info.url
+  const library = state?.libraryPath || info.libraryPath
+  const live = await probeEndpoint(endpoint, 4000)
+  console.log(`\nendpoint: ${endpoint}${endpoint !== info.url ? '  (resolved by the plugin; a profile patch override is in effect)' : ''}`)
   console.log(`  ${live.ok ? `answers with ${live.tools.length} tools` : `not reachable (${live.error})`}`)
   if (live.ok && !live.tools.some((tool) => tool.startsWith('flymemory_'))) {
     problems.push('the port answers but publishes no flymemory_ tools — another program is using it')
   }
+  console.log(`library: ${library}  ${existsSync(library) ? '' : '(not created yet)'}`)
   console.log(`\ndata dir: ${info.dataDir}`)
   if (problems.length === 0) {
     console.log('\nno problems found.')

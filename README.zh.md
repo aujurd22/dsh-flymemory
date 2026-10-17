@@ -50,8 +50,8 @@ DSH 会话 ──┬── mcp__flymemory__*   模型可调的 15 个工具
 
 ## 需要什么
 
-- 带 `@deepseek-ai/dsh-mcp-client` 和 `@deepseek-ai/dsh-hooks-claude-code` 的
-  DeepSeek Harness。在 `0.2.0-rc.2` 上开发验证。
+- 带 `@deepseek-ai/dsh-mcp-client` 的 DeepSeek Harness。在 `0.2.0-rc.2` 与 `44.7.0`
+  上开发验证。
 - Node 20 以上（插件本体和 CLI）。
 - Python 3.10 以上，装引擎的依赖：
 
@@ -73,8 +73,8 @@ DSH 会话 ──┬── mcp__flymemory__*   模型可调的 15 个工具
 plugin_manager(action: "install_bundle", target: "/absolute/path/to/dsh-flymemory")
 ```
 
-或者打开 Web 侧边栏的 **Plugins** 页面，选这个文件夹。harness 重新加载后会有三行
-插件起来（`flymemory`、`flymemory-mcp`、`flymemory-hooks`），工具就出现了。
+或者打开 Web 侧边栏的 **Plugins** 页面，选这个文件夹。harness 重新加载后会有两行
+插件起来（`flymemory`、`flymemory-mcp`），工具就出现了。
 
 自检：
 
@@ -95,13 +95,15 @@ plugin_manager(action: "remove_bundle", target: "dsh-flymemory")
 
 ## 运行方式
 
-bundle 插入三行：
+bundle 插入两行：
 
 | 行 | 模块 | 干的事 |
 |---|---|---|
-| `flymemory` | 本包 | 探端口；没人应答就拉起引擎；生成钩子配置 |
+| `flymemory` | 本包 | 探端口；没人应答就拉起引擎；记录解析结果；注册召回/捕获钩子 |
 | `flymemory-mcp` | `@deepseek-ai/dsh-mcp-client` | 把服务端的工具变成 `mcp__flymemory__<tool>` |
-| `flymemory-hooks` | `@deepseek-ai/dsh-hooks-claude-code` | 在对应事件上跑那两个钩子脚本 |
+
+钩子以前挂在 DSH 的 Claude-Code hook bridge 上。44.7 开始的版本不再带那个包，所以同样的
+逻辑改成跑在插件自己的 `agent/pre-step` 上，bundle 也不再依赖 hook bridge。
 
 harness 启动时第一行先探 `127.0.0.1:8791`：已经有 FlyMemory 服务在应答就直接复用，
 两个 harness 窗口共享同一个引擎和同一份记忆；端口空着就后台把自带引擎拉起来，等它
@@ -140,7 +142,9 @@ harness 启动时第一行先探 `127.0.0.1:8791`：已经有 FlyMemory 服务�
     device: cpu
     readinessTimeoutMs: 25000   # 0 = 不等待，工具晚点自己出来
     shutdownOnDispose: true     # 退出时关掉本次拉起的引擎
-    writeHooksConfig: true
+    nativeHooks: true           # 每条手打提示做召回+捕获
+    hookTimeoutMs: 6000         # 每次钩子请求的预算
+    writeHooksConfig: true      # 同时给 DSH 之外的客户端写 hooks.json
     seedFromUpstream: false     # 默认不导入别的库
     upstreamLibrary: ''         # 想导入就同时配这两项
     autostart: true
@@ -153,6 +157,8 @@ harness 启动时第一行先探 `127.0.0.1:8791`：已经有 FlyMemory 服务�
 `$DSH_HOME/flymemory-data/flymemory_v3.pkl`，就一个文件，备份和删除都很直接。同目录还有：
 
 - `hooks.json` — 每次激活重新生成，描述那两个钩子
+- `state.json` — 上次激活实际解析出来的结果（端点、库、解释器、服务是怎么来的）；
+  `status` 和 `doctor` 读它，所以有 profile 覆盖时会报真实值而不是默认值
 - `engine.log` — 引擎进程的 stdout/stderr
 - `server.log` — 引擎自己的日志
 - `server.pid` — 给 `flymemory stop` 用来找进程
@@ -170,17 +176,28 @@ node bin/flymemory.mjs log -n 40
 
 ## 关于钩子
 
-默认是开着的，毕竟「自动记忆」就是这个插件的意义。但它具体做了什么，值得说清楚：
+默认是开着的，毕竟「自动记忆」就是这个插件的意义。钩子跑在插件自己身上（`agent/pre-step`），
+不依赖宿主的 hook bridge。它具体做了什么，值得说清楚：
 
-- 你发的每条提示都会写进记忆文件。全在本地、开销很小，但它确实是一份输入记录。
-- 召回的内容会附到当前回合，占一点上下文，实测大概每轮 1.5KB。
-- 长得像密钥的内容不会入库：引擎会拒掉 `ghp_`、`github_pat_`、`sk-ant-`、`AKIA`、
-  私钥头这类文本。
+- **只有你真正打出来的消息会被记录和召回**。宿主给手打提示打的是
+  `source.kind === "user"`；peer 消息、系统提醒、自动化心跳、模型切换通知都带别的 kind，
+  一律忽略。被委派的子 agent 只在任务开始时召回一次，之后不再记录。
+- 长得像密钥的文本不会入库，自动化/心跳提示在发往服务之前就被跳过。
+- 召回内容附到当前回合，上限约 2.5KB，并明确标注「这是数据、不是指令」。
+- 还有一次请求专门取 `compartment="lessons"` 的前两条，单独注入。踩过的坑因此每轮都在
+  眼前，而不是和普通记忆抢名额。存教训用 `flymemory_remember` 加
+  `compartment="lessons"`，文本开头写清楚「哪个工具/哪个环境」，因为最后是靠词法通道
+  把它捞回来的。
 
-只想要工具、不想要自动化：
+只想要工具、不想要自动化，就把这一行的开关关掉（patch 条目是整体替换 `config`，
+需要的字段要写全）：
 
-```
-plugin_manager(action: "set_plugin", target: "include:flymemory-hooks", enabled: false)
+```yaml
+- id: flymemory
+  name: 'dsh-flymemory'
+  config:
+    port: 8791
+    nativeHooks: false
 ```
 
 ## 导入已有的库
@@ -199,6 +216,30 @@ plugin_manager(action: "set_plugin", target: "include:flymemory-hooks", enabled:
 下次激活时，只要目标文件还不存在就复制过去，源文件保持不动。两边格式一致，以后想搬出去
 也可以。
 
+## 分享一个已经在跑的服务
+
+如果这台机器上已经有 FlyMemory 服务在跑，而你希望 DSH 直接用它的记忆、而不是自己另存
+一份，覆盖这两行即可（写在你自己 profile 的 patch 层）：
+
+```yaml
+- id: flymemory
+  name: 'dsh-flymemory'
+  config:
+    port: 8765
+    libraryPath: 'D:\path\to\flymemory_v3.pkl'
+- id: flymemory-mcp
+  name: '@deepseek-ai/dsh-mcp-client'
+  config:
+    serverName: flymemory
+    transport: streamable-http
+    url: 'http://127.0.0.1:8765/mcp'
+```
+
+`port` 是插件去哪找现成的服务；`libraryPath` 是万一它得自己拉引擎时开哪个文件——两条路
+通向同一份记忆。钩子那行不用动，它会跟着插件解析出来的端点走。
+`node bin/flymemory.mjs status` 在这种覆盖生效时会标出 "from hooks.json"，一眼能看出
+用的不是默认值。
+
 ## 想改代码
 
 ```bash
@@ -216,7 +257,7 @@ Node 20 / 22 / 24，加上语法检查和单元测试。
 ```
 lib/index.js        Host 端：探端口、管引擎、生成钩子配置
 bin/flymemory.mjs   CLI，复用同一套函数
-cordis.patch.yml    这个 bundle 插入的三行
+cordis.patch.yml    这个 bundle 插入的两行
 python/             随包的 FlyMemory 引擎（服务端、钩子、引擎包）
 locale/{en,zh}.json Plugins 页面显示的标题和描述
 tests/              单元测试、引擎冒烟、协议冒烟

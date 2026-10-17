@@ -1,12 +1,15 @@
-# dsh-flymemory bundle patch — three rows, applied on top of the shipped
+# dsh-flymemory bundle patch — two rows, applied on top of the shipped
 # composition when this bundle is selected in the profile.
 #
-#   1. flymemory         starts (or reuses) this plugin's own FlyMemory MCP
-#                        service and regenerates the hook config.
+#   1. flymemory         starts (or reuses) this plugin's FlyMemory MCP service,
+#                        writes the resolved settings, and registers the
+#                        recall/capture hooks on `agent/pre-step`.
 #   2. flymemory-mcp     bridges the service's 15 tools into the tool registry
 #                        as `mcp__flymemory__<tool>`.
-#   3. flymemory-hooks   runs FlyMemory's auto-capture / recall-injection hooks
-#                        through the Claude-Code hook bridge.
+#
+# The hooks used to ride the Claude-Code hook bridge (`dsh-hooks-claude-code`).
+# Newer DSH builds dropped that package, so the same logic now runs inside the
+# `flymemory` row itself and this bundle declares no hook-bridge dependency.
 #
 # The plugin keeps its memory to itself:
 #   * its own service port (8791 by default);
@@ -14,7 +17,7 @@
 #   * nothing imported from anywhere unless `upstreamLibrary` is set on the
 #     `flymemory` row (seedFromUpstream stays false).
 #
-# Override any of it before starting the harness (all three rows follow these):
+# Override any of it before starting the harness (both rows follow these):
 #   FLYMEMORY_MCP_PORT   service port                 (default 8791)
 #   FLYMEMORY_MCP_URL    full endpoint URL            (default http://127.0.0.1:<port>/mcp)
 #   FLYMEMORY_DATA_DIR   library/log directory        (default $DSH_HOME/flymemory-data)
@@ -40,9 +43,3 @@
           initialDelayMs: 1000
           maxDelayMs: 15000
           maxAttempts: 60
-
-    - id: flymemory-hooks
-      name: '@deepseek-ai/dsh-hooks-claude-code'
-      config:
-        configPath: !!js "dshHomePath('flymemory-data/hooks.json')"
-        defaultTimeoutMs: 30000

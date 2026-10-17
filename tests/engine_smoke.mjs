@@ -17,7 +17,7 @@
 import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { setTimeout as sleep } from 'node:timers/promises'
 
-import { DEFAULT_PORT, apply, findPython, resolveOptions, tempDataDir } from '../lib/index.js'
+import { DEFAULT_PORT, apply, findPython, readState, resolveOptions, tempDataDir } from '../lib/index.js'
 
 const argv = process.argv.slice(2)
 const flag = (name, fallback) => {
@@ -113,6 +113,8 @@ console.log('')
 
 check(port !== 8765, "uses the plugin's own port", String(port))
 check(logs.some((line) => line.includes('engine ready') || line.includes('reusing')), 'engine became ready')
+const state = readState(dataDir)
+check(Boolean(state) && state.endpoint === url, 'activation state recorded', state ? state.endpoint : 'missing')
 check(base.upstreamLibrary === '', 'no upstream library configured, so nothing was imported')
 
 const hooksPath = `${dataDir}/hooks.json`

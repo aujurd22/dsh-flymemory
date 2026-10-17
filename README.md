@@ -53,9 +53,8 @@ Both hooks are silent when the service is down, and neither can block a turn.
 
 ## Requirements
 
-- DeepSeek Harness with `@deepseek-ai/dsh-mcp-client` and
-  `@deepseek-ai/dsh-hooks-claude-code` available. Built and tested against
-  `0.2.0-rc.2`.
+- DeepSeek Harness with `@deepseek-ai/dsh-mcp-client` available. Built and
+  tested against `0.2.0-rc.2` and `44.7.0`.
 - Node 20+ (the add-on and its CLI).
 - Python 3.10+ with the engine's dependencies:
 
@@ -80,8 +79,7 @@ plugin_manager(action: "install_bundle", target: "/absolute/path/to/dsh-flymemor
 ```
 
 Or use the **Plugins** page in the Web sidebar and pick the folder. The harness
-reloads, three rows come up (`flymemory`, `flymemory-mcp`, `flymemory-hooks`),
-and the tools appear.
+reloads, two rows come up (`flymemory`, `flymemory-mcp`), and the tools appear.
 
 Check it:
 
@@ -103,13 +101,16 @@ Your memory file is not deleted — remove it by hand if you want it gone.
 
 ## How it runs
 
-The bundle inserts three rows:
+The bundle inserts two rows:
 
 | Row | Module | Job |
 |---|---|---|
-| `flymemory` | this package | Probes the port, starts the engine if nothing is there, writes the hook config |
+| `flymemory` | this package | Probes the port, starts the engine if nothing is there, records the resolved settings, registers the recall/capture hooks |
 | `flymemory-mcp` | `@deepseek-ai/dsh-mcp-client` | Turns the service's tools into `mcp__flymemory__<tool>` |
-| `flymemory-hooks` | `@deepseek-ai/dsh-hooks-claude-code` | Runs the two hook scripts on the right events |
+
+The hooks used to ride DSH's Claude-Code hook bridge. Builds from 44.7 onwards no
+longer ship that package, so the same logic now runs on the plugin's own
+`agent/pre-step` listener and the bundle declares no hook-bridge dependency.
 
 When the harness starts, the first row checks `127.0.0.1:8791`. If a FlyMemory
 service is already answering there, it's reused — two harness windows share one
@@ -134,7 +135,7 @@ Environment variables, read before the harness starts:
 |---|---|---|
 | `FLYMEMORY_MCP_PORT` | `8791` | Service port |
 | `FLYMEMORY_MCP_URL` | `http://127.0.0.1:<port>/mcp` | Full endpoint |
-| `FLYMEMORY_DATA_DIR` | `$DSH_HOME/flymemory-data` | Library, logs, hook config, pid file |
+| `FLYMEMORY_DATA_DIR` | `$DSH_HOME/flymemory-data` | Library, logs, settings record, pid file |
 | `FLYMEMORY_PYTHON` | auto-detected | Interpreter for the engine |
 | `FLYMEMORY_DEVICE` / `FLYMEMORY_MODEL` | `cpu` / multilingual MiniLM | Passed to the engine |
 
@@ -152,7 +153,9 @@ patch entry replaces the whole `config`, so write out everything you need:
     device: cpu
     readinessTimeoutMs: 25000   # 0 = don't wait, let the tools show up later
     shutdownOnDispose: true     # stop the engine this activation started
-    writeHooksConfig: true
+    nativeHooks: true           # recall/capture on every typed prompt
+    hookTimeoutMs: 6000         # budget per hook request
+    writeHooksConfig: true      # also write hooks.json for clients outside DSH
     seedFromUpstream: false     # don't import another library implicitly
     upstreamLibrary: ''         # set both to import one, once
     autostart: true
@@ -167,6 +170,9 @@ The rest of the options are documented in `resolveOptions()` in
 up or delete. Alongside it:
 
 - `hooks.json` — regenerated on every activation; describes the two hooks
+- `state.json` — what the last activation resolved (endpoint, library,
+  interpreter, how the service was obtained); `status` and `doctor` read it, so
+  they report an override instead of the defaults
 - `engine.log` — stdout/stderr of the engine process
 - `server.log` — the engine's own log
 - `server.pid` — so `flymemory stop` knows what to kill
@@ -185,19 +191,32 @@ After installing the bundle, the same CLI is linked into the profile at
 ## About the hooks
 
 They're on by default, because automatic memory is the whole point of the thing.
+They run inside this plugin on `agent/pre-step` — no hook bridge package needed.
 Worth knowing exactly what that means:
 
-- Every prompt you send is written to the memory file. It's local and cheap, but
-  it is a record of what you typed.
-- Recalled memories are appended to the turn, which costs some context — in
-  practice around 1.5 KB per turn.
-- Credential-shaped text never gets stored: the engine rejects things like
-  `ghp_`, `github_pat_`, `sk-ant-`, `AKIA` and private key headers.
+- **Only messages you actually typed are stored and recalled.** The harness tags
+  a typed prompt `source.kind === "user"`; peer deliveries, system reminders,
+  automation prompts and model-change notices carry other kinds and are ignored.
+  A delegated agent gets one recall at task start, then nothing more.
+- Credential-shaped text never gets stored, and automation/heartbeat prompts are
+  skipped before they reach the service.
+- Recalled memories are appended to the turn, capped at about 2.5 KB, with a
+  header saying they are data rather than instructions.
+- A second request pulls the top two entries of `compartment="lessons"` and
+  injects them on their own, so pitfalls come back every turn instead of
+  competing with ordinary recall. Store one with `flymemory_remember` and
+  `compartment="lessons"`, starting the text with the tool or environment names
+  that should bring it back — the keyword channel is what finds it.
 
-If you'd rather have the tools and no automation:
+If you'd rather have the tools and no automation, turn the hooks off on the row
+(a patch entry replaces the whole `config`, so restate what you need):
 
-```
-plugin_manager(action: "set_plugin", target: "include:flymemory-hooks", enabled: false)
+```yaml
+- id: flymemory
+  name: 'dsh-flymemory'
+  config:
+    port: 8791
+    nativeHooks: false
 ```
 
 ## Importing a library you already have
@@ -218,6 +237,41 @@ On the next activation the file is copied into place if the target doesn't exist
 yet. The original is left alone. The format is the same in both directions, so
 you can move it back out later.
 
+## Sharing a service you already run
+
+If a FlyMemory service is already running on this machine and you want DSH to
+share its memory rather than keep its own, override both rows in your profile
+patch:
+
+```yaml
+- id: flymemory
+  name: 'dsh-flymemory'
+  config:
+    port: 8765
+    libraryPath: 'D:\path\to\flymemory_v3.pkl'
+- id: flymemory-mcp
+  name: '@deepseek-ai/dsh-mcp-client'
+  config:
+    serverName: flymemory
+    transport: streamable-http
+    url: 'http://127.0.0.1:8765/mcp'
+```
+
+`port` is where the plugin looks for the existing service; `libraryPath` is the
+file it serves if it ever has to start the engine itself, so both routes lead to
+the same memory. Leave the hooks row alone — it follows the endpoint the plugin
+resolved. `node bin/flymemory.mjs status` prints "from hooks.json" when an
+override like this is in effect, so you can tell it apart from the defaults.
+
+<details>
+<summary>Why the hooks row needs no override</summary>
+
+The supervisor writes `<dataDir>/hooks.json` on every activation from the config
+it resolved, so the hook scripts always post to whatever endpoint the plugin
+actually uses. That file is also how `status` and `doctor` discover an override.
+
+</details>
+
 ## Working on it
 
 ```bash
@@ -237,7 +291,7 @@ across Node 20, 22 and 24.
 ```
 lib/index.js        Host half: port probing, engine supervision, hook config
 bin/flymemory.mjs   CLI built on the same helpers
-cordis.patch.yml    the three rows this bundle inserts
+cordis.patch.yml    the two rows this bundle inserts
 python/             vendored FlyMemory engine (server, hooks, engine package)
 locale/{en,zh}.json title and description for the Plugins page
 tests/              unit tests, engine smoke test, protocol smoke test
