@@ -8,12 +8,12 @@ the FlyMemory engine so the plugin works without a separate checkout.
 - Upstream project: <https://github.com/aujurd22/flymemory>
 - License: MIT — Copyright (c) 2026 Junrong Du
 - Vendored under [`python/`](python/)
-- Synced with upstream working tree at `6a8d614` (2026-10-17). Included since the
-  first import: the keyed-state write fix in `v3.py`, the dated age stamps and
-  the FORM/LESSON/aggregation guidance in the tool descriptions, the lesson
-  channel plus low-confidence gate in `hook_auto.py`, and the automation-message
-  filter that was still uncommitted upstream on that date (a heartbeat prompt had
-  been shredded into 32 memory entries).
+- Synced with upstream `246d9bd` plus the uncommitted working tree of 2026-10-24
+  (multi-app provenance). Included since the first import: the keyed-state write
+  fix, the dated age stamps, the FORM/LESSON/aggregation guidance, the lesson
+  channel with its low-confidence gate, the automation-message filter, the
+  per-entry `app:<name>` provenance tags, and the rebuildable-store maintenance
+  tool.
 
 ### Files copied byte for byte
 
@@ -30,28 +30,32 @@ the FlyMemory engine so the plugin works without a separate checkout.
 recall path (its own docstring says so); nothing in this plugin imports it. It is
 vendored only so the copied `flymemory` package is not missing a module.
 
+`maintenance.py` is the upstream maintenance CLI (`export-facts` to SQLite,
+`rebuild-embeddings`). It is not imported by the server either; it is included so
+the package is complete. Its default paths point at the package layout and every
+path is overridable with `--pkl` / `--to` / `--from` / `--out`, which is what you
+want for a data directory outside the package.
+
 ### Files copied with adaptations
 
 | Vendored path | Upstream path | Change |
 |---|---|---|
-| `python/flymemory_server.py` | `flymemory/mcp_v3.py` | Runtime paths became configurable (`--data-dir`, `--db`, `--host`, `--port`, `--write-pid-file`), so the library, logs and pid file no longer sit next to the code — an installed package may be a read-only copy. The built-in fallback port is 8791 instead of 8765, matching this project; the plugin always passes `--port` explicitly, so the fallback only matters when you run the server by hand. No tool behaviour otherwise. |
-| `python/hook_auto.py` | `flymemory/hook_auto.py` | The endpoint moved from a hard-coded URL to `--url` → `FLYMEMORY_MCP_URL` → built-in default (8791). |
+| `python/flymemory_server.py` | `flymemory/mcp_v3.py` | Runtime paths became configurable (`--data-dir`, `--db`, `--host`, `--port`, `--write-pid-file`), so the library, logs and pid file no longer sit next to the code — an installed package may be a read-only copy. The built-in fallback port is 8791 instead of 8765, matching this project; the plugin always passes `--port` explicitly, so the fallback only matters when you run the server by hand. Tool behaviour is upstream's, including the multi-app `app:<name>` tags. |
+| `python/hook_auto.py` | `flymemory/hook_auto.py` | The endpoint moved from a hard-coded URL to `--url` → `FLYMEMORY_MCP_URL` → built-in default (8791). The `--client` app tag and the ZCode/Qoder output shapes are upstream verbatim. |
 | `python/hook_compact.py` | `flymemory/hook_compact.py` | Same endpoint change. |
+| `python/flymemory/maintenance.py` | `flymemory/maintenance.py` | One line: the "service is still running" guard probes `FLYMEMORY_PORT` (default 8765) instead of a hard-coded 8765. |
 
 The upstream MIT notice above applies to all of these files. If you only want
 the plugin without a vendored engine, point the row's `scriptPath` at your own
 FlyMemory checkout instead (`FLYMEMORY_ENGINE` is not used; use the row config).
 
-### Local fix carried in `python/flymemory_server.py`
+### A bug that used to need a local fix
 
-`flymemory_auto` raised `UnboundLocalError: cannot access local variable
-'recall_parts'` whenever the library was empty, because the upstream code binds
-that variable only inside the `if results:` branch. On an empty library the tool
-failed *before* storing anything, so the auto-capture path broke on exactly the
-state a fresh installation starts in. The vendored copy binds `recall_parts`
-before the branch; the behaviour on a non-empty library is unchanged. Worth
-fixing upstream as well — reported here rather than patched in the original
-project.
+Earlier versions of this copy patched `flymemory_auto` because upstream bound
+`recall_parts` only inside one branch, so an empty library raised
+`UnboundLocalError` before storing anything. Upstream fixed it in `264aa69`
+("recall_parts scoping"), and this copy now carries the upstream code unchanged.
+No local tool-behaviour patches remain.
 
 ## DeepSeek Harness packages
 

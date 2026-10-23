@@ -17,7 +17,7 @@
 import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { setTimeout as sleep } from 'node:timers/promises'
 
-import { DEFAULT_PORT, apply, findPython, readState, resolveOptions, tempDataDir } from '../lib/index.js'
+import { DEFAULT_PORT, apply, findPython, mcpUrl, readState, resolveOptions, tempDataDir } from '../lib/index.js'
 
 const argv = process.argv.slice(2)
 const flag = (name, fallback) => {
@@ -35,7 +35,9 @@ const check = (ok, label, detail = '') => {
 }
 
 const base = resolveOptions({ dataDir, port, seedFromUpstream: false, readinessTimeoutMs: 120000 })
+// The plugin tags the endpoint with ?app=dsh; plain calls still work without it.
 const url = `http://127.0.0.1:${port}/mcp`
+const pluginUrl = mcpUrl(base)
 const { pythonExe, verified } = findPython(base)
 console.log(`\nengine smoke test — port ${port}, data dir ${dataDir}`)
 console.log(`interpreter: ${pythonExe || '(none found)'}${verified ? '' : ' — dependencies not found'}\n`)
@@ -47,7 +49,7 @@ if (!pythonExe || !verified) {
 }
 
 const rpc = async (method, params) => {
-  const response = await fetch(url, {
+  const response = await fetch(pluginUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
@@ -98,6 +100,9 @@ const ctx = {
     disposer = callback()
     return () => disposer?.()
   },
+  // The stub only needs to accept the listener registration; the waterfall is
+  // exercised by the unit tests.
+  on: () => () => {},
 }
 
 const started = Date.now()
@@ -114,7 +119,7 @@ console.log('')
 check(port !== 8765, "uses the plugin's own port", String(port))
 check(logs.some((line) => line.includes('engine ready') || line.includes('reusing')), 'engine became ready')
 const state = readState(dataDir)
-check(Boolean(state) && state.endpoint === url, 'activation state recorded', state ? state.endpoint : 'missing')
+check(Boolean(state) && state.endpoint === pluginUrl, 'activation state recorded', state ? state.endpoint : 'missing')
 check(base.upstreamLibrary === '', 'no upstream library configured, so nothing was imported')
 
 const hooksPath = `${dataDir}/hooks.json`
@@ -123,7 +128,7 @@ if (existsSync(hooksPath)) {
   const hooks = JSON.parse(readFileSync(hooksPath, 'utf8'))
   const command = hooks?.hooks?.UserPromptSubmit?.[0]?.hooks?.[0]?.command ?? ''
   check(command.includes('hook_auto.py'), 'UserPromptSubmit command targets hook_auto.py')
-  check(command.includes(`--url "${url}"`), 'hook command carries the resolved endpoint')
+  check(command.includes(`--url "${pluginUrl}"`), 'hook command carries the resolved endpoint')
 }
 
 let names = []
@@ -155,6 +160,7 @@ try {
     tags: 'smoke,dsh-flymemory',
   })
   check(!stored.includes('[REJECTED]'), 'flymemory_remember stored the probe', stored.slice(0, 80))
+  check(stored.includes('app=dsh'), 'the write is tagged app=dsh', stored.slice(0, 80))
   created.push(...[...stored.matchAll(/#(\d+)/g)].map((match) => Number(match[1])))
   // The engine creates the library file on its first write, not at startup.
   check(existsSync(base.libraryPath), 'own library persisted inside the data directory', base.libraryPath)

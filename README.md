@@ -134,10 +134,18 @@ Environment variables, read before the harness starts:
 | Variable | Default | |
 |---|---|---|
 | `FLYMEMORY_MCP_PORT` | `8791` | Service port |
-| `FLYMEMORY_MCP_URL` | `http://127.0.0.1:<port>/mcp` | Full endpoint |
+| `FLYMEMORY_MCP_URL` | `http://127.0.0.1:<port>/mcp?app=dsh` | Full endpoint (an `?app=` already present is kept) |
+| `FLYMEMORY_APP` | `dsh` | Source tag written on every entry this plugin stores |
 | `FLYMEMORY_DATA_DIR` | `$DSH_HOME/flymemory-data` | Library, logs, settings record, pid file |
 | `FLYMEMORY_PYTHON` | auto-detected | Interpreter for the engine |
 | `FLYMEMORY_DEVICE` / `FLYMEMORY_MODEL` | `cpu` / multilingual MiniLM | Passed to the engine |
+
+A FlyMemory service can be shared by several clients, and each write carries an
+`app:<name>` tag saying which one produced it. This plugin connects with
+`?app=dsh`, so its entries are marked `app=dsh` in recall output and counted under
+`Apps:` in `flymemory_stats` — next to ZCode's `app=zcode` and older untagged
+`app=legacy` entries. Change the tag with `FLYMEMORY_APP` if you run several DSH
+profiles against one store.
 
 Anything else goes on the row itself, in your profile's `cordis.patch.yml`. A
 patch entry replaces the whole `config`, so write out everything you need:

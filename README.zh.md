@@ -123,10 +123,16 @@ harness 启动时第一行先探 `127.0.0.1:8791`：已经有 FlyMemory 服务�
 | 变量 | 默认值 | |
 |---|---|---|
 | `FLYMEMORY_MCP_PORT` | `8791` | 服务端口 |
-| `FLYMEMORY_MCP_URL` | `http://127.0.0.1:<port>/mcp` | 完整端点 |
-| `FLYMEMORY_DATA_DIR` | `$DSH_HOME/flymemory-data` | 记忆、日志、钩子配置、pid |
+| `FLYMEMORY_MCP_URL` | `http://127.0.0.1:<port>/mcp?app=dsh` | 完整端点（已带 `?app=` 的原样保留） |
+| `FLYMEMORY_APP` | `dsh` | 本插件写入的每条记忆带的来源标签 |
+| `FLYMEMORY_DATA_DIR` | `$DSH_HOME/flymemory-data` | 记忆、日志、状态记录、pid |
 | `FLYMEMORY_PYTHON` | 自动探测 | 引擎用的解释器 |
 | `FLYMEMORY_DEVICE` / `FLYMEMORY_MODEL` | `cpu` / 多语言 MiniLM | 传给引擎 |
+
+同一个 FlyMemory 服务可以被多个客户端共用，每条写入都带 `app:<name>` 标签标明是谁写的。
+本插件用 `?app=dsh` 连接，所以它的条目在召回里显示 `app=dsh`，在 `flymemory_stats`
+的 `Apps:` 里单独计数——和 ZCode 的 `app=zcode`、更早未标记的 `app=legacy` 并列。
+同一份库接多个 DSH profile 时，用 `FLYMEMORY_APP` 区分。
 
 其余参数写在你自己 profile 的 `cordis.patch.yml` 里，挂在对应行上。注意 patch 条目是
 **整体替换** `config` 的，需要的字段要写全：

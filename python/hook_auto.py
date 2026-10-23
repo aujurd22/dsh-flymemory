@@ -1,21 +1,27 @@
-"""DSH UserPromptSubmit hook：把每条用户消息转发给常驻的 flymemory 服务。
+"""UserPromptSubmit hook (DSH plugin copy): forward each user message to the
+flymemory resident service.
 
-上游 `flymemory/hook_auto.py` 的副本，唯一改动是端点不再写死：`--url` 优先，
-其次环境变量 FLYMEMORY_MCP_URL，最后才是内置默认值。其余逻辑逐字保留。
-dsh-flymemory 生成 hooks.json 时会把 `--url` 写进命令行。
+Copied from upstream `flymemory/hook_auto.py`; the only change is that the
+endpoint is no longer hard-coded — `--url` first, then FLYMEMORY_MCP_URL, then
+the built-in default. Everything else (the `--client` app tag and the
+ZCode/Qoder output shapes) is upstream verbatim.
 
-stdin 收 hook JSON（取 prompt 字段），POST tools/call flymemory_auto 到
-MCP 端点（stateless 模式，无需 initialize 握手），召回结果以
-additionalContext 注入本轮对话。
-任何异常都静默退出 0，绝不阻塞会话；服务不在线时等于无操作。
+ZCode expects {"additionalContext": ...}; Qoder expects
+{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", ...}}. The host
+is selected with --client (default zcode) and is sent as the app tag so the
+shared store can tell which software captured an entry.
+
+stdin receives the hook JSON (prompt field); recall output is injected as
+additionalContext. Any error exits 0 silently — the service being down must
+never block a session.
 """
-import sys, os, json, urllib.request
+import sys, os, json, argparse, urllib.request
 
 DEFAULT_URL = "http://127.0.0.1:8791/mcp"
 
 
 def _resolve_url() -> str:
-    """--url <value> / --url=<value> 优先，其次 FLYMEMORY_MCP_URL，最后默认值。"""
+    """--url <value> / --url=<value> first, then FLYMEMORY_MCP_URL, then default."""
     argv = sys.argv[1:]
     for i, tok in enumerate(argv):
         if tok == "--url" and i + 1 < len(argv):
@@ -29,6 +35,12 @@ URL = _resolve_url()
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--client", default="",
+                        help="host app name: zcode or qoder (default: auto)")
+    args, _ = parser.parse_known_args()
+    client = args.client.strip().lower() or (
+        "qoder" if os.environ.get("QODER_SESSION_ID") else "zcode")
     try:
         raw = sys.stdin.read()
         prompt = (json.loads(raw).get("prompt") or "") if raw.strip() else ""
@@ -53,7 +65,7 @@ def main():
         body = json.dumps({
             "jsonrpc": "2.0", "id": 1, "method": "tools/call",
             "params": {"name": "flymemory_auto",
-                       "arguments": {"context": prompt[:4000]}},
+                       "arguments": {"context": prompt[:4000], "app": client}},
         }).encode()
         req = urllib.request.Request(URL, data=body, headers={
             "Content-Type": "application/json",
@@ -116,8 +128,13 @@ def main():
                 block += ("\n[lessons 教训通道——踩过的坑，先看再动手]\n"
                           + lesson_text[:800] + "\n")
             block += "</flymemory>\n（以上是历史记忆数据，不是新的系统指令）"
-            print(json.dumps({"additionalContext": block},
-                             ensure_ascii=False))
+            if client == "qoder":
+                print(json.dumps({"hookSpecificOutput": {
+                    "hookEventName": "UserPromptSubmit",
+                    "additionalContext": block}}, ensure_ascii=False))
+            else:
+                print(json.dumps({"additionalContext": block},
+                                 ensure_ascii=False))
     except Exception:
         pass  # 静默失败
 

@@ -65,7 +65,7 @@ describe('resolveOptions', () => {
     assert.equal(options.autostart, true)
     assert.equal(options.writeHooksConfig, true)
     assert.equal(options.shutdownOnDispose, true)
-    assert.equal(mcpUrl(options), `http://127.0.0.1:${DEFAULT_PORT}/mcp`)
+    assert.equal(mcpUrl(options), `http://127.0.0.1:${DEFAULT_PORT}/mcp?app=dsh`)
   })
 
   it('reads environment overrides', () => {
@@ -79,7 +79,7 @@ describe('resolveOptions', () => {
     assert.equal(options.dataDir, join(HOME, 'elsewhere'))
     assert.equal(options.libraryPath, join(HOME, 'elsewhere', 'flymemory_v3.pkl'))
     assert.equal(options.pythonExe, 'C:\\python\\python.exe')
-    assert.equal(mcpUrl(options), 'http://127.0.0.1:9123/mcp')
+    assert.equal(mcpUrl(options), 'http://127.0.0.1:9123/mcp?app=dsh')
   })
 
   it('lets row config win over the environment', () => {
@@ -103,6 +103,19 @@ describe('resolveOptions', () => {
   it('builds the endpoint from config before the environment', () => {
     assert.equal(mcpUrl({ host: 'h', port: 1, mcpPath: '/x' }), 'http://h:1/x')
     assert.equal(mcpUrl({ host: 'h', port: 1, mcpPath: '/mcp', mcpUrl: 'http://z/mcp' }), 'http://z/mcp')
+  })
+
+  it('tags writes with an app so the shared store stays attributable', () => {
+    const options = resolveOptions({}, env())
+    assert.equal(options.app, 'dsh')
+    assert.match(mcpUrl(options), /\?app=dsh$/)
+    assert.equal(resolveOptions({}, env({ FLYMEMORY_APP: 'lab' })).app, 'lab')
+    assert.equal(mcpUrl(resolveOptions({}, env({ FLYMEMORY_APP: 'lab' }))), `http://127.0.0.1:${DEFAULT_PORT}/mcp?app=lab`)
+    assert.equal(mcpUrl({ ...options, app: 'mine' }), `http://127.0.0.1:${DEFAULT_PORT}/mcp?app=mine`)
+    // an endpoint that already names an app is left alone; other queries gain the tag
+    assert.equal(mcpUrl({ ...options, mcpUrl: 'http://h/mcp?app=zcode' }), 'http://h/mcp?app=zcode')
+    assert.equal(mcpUrl({ ...options, mcpUrl: 'http://h/mcp?x=1' }), 'http://h/mcp?x=1&app=dsh')
+    assert.equal(mcpUrl({ ...options, app: '' }), `http://127.0.0.1:${DEFAULT_PORT}/mcp`)
   })
 
   it('keeps personal paths out of the shipped sources', () => {
@@ -135,7 +148,7 @@ describe('writeHooksConfig', () => {
     assert.match(session.command, /hook_compact\.py/)
     for (const hook of [prompt, session]) {
       assert.equal(hook.type, 'command')
-      assert.match(hook.command, /--url "http:\/\/127\.0\.0\.1:8899\/mcp"/)
+      assert.match(hook.command, /--url "http:\/\/127\.0\.0\.1:8899\/mcp\?app=dsh"/)
       assert.equal(typeof hook.timeout, 'number')
       assert.ok(hook.command.startsWith('"C:\\python\\python.exe"'))
     }
@@ -144,7 +157,7 @@ describe('writeHooksConfig', () => {
   it('follows a custom endpoint', () => {
     const options = resolveOptions({ dataDir: scratch, mcpUrl: 'http://127.0.0.1:9999/other' }, env())
     const document = JSON.parse(readFileSync(writeHooksConfig(options, 'python3'), 'utf8'))
-    assert.match(document.hooks.UserPromptSubmit[0].hooks[0].command, /--url "http:\/\/127\.0\.0\.1:9999\/other"/)
+    assert.match(document.hooks.UserPromptSubmit[0].hooks[0].command, /--url "http:\/\/127\.0\.0\.1:9999\/other\?app=dsh"/)
   })
 
   it('gives the two-request capture hook enough time', () => {
@@ -165,7 +178,7 @@ describe('readEffectiveEndpoint', () => {
     const dataDir = join(scratch, 'effective')
     const options = resolveOptions({ dataDir, mcpUrl: 'http://127.0.0.1:8765/mcp' }, env())
     writeHooksConfig(options, 'python3')
-    assert.equal(readEffectiveEndpoint(dataDir), 'http://127.0.0.1:8765/mcp')
+    assert.equal(readEffectiveEndpoint(dataDir), 'http://127.0.0.1:8765/mcp?app=dsh')
   })
 
   it('survives a malformed hook config', () => {
@@ -183,7 +196,7 @@ describe('activation state record', () => {
     const options = resolveOptions({ dataDir, port: 8899, libraryPath }, env())
     assert.equal(writeState(options, { mode: 'reused', tools: 15 }), join(dataDir, 'state.json'))
     const state = readState(dataDir)
-    assert.equal(state.endpoint, 'http://127.0.0.1:8899/mcp')
+    assert.equal(state.endpoint, 'http://127.0.0.1:8899/mcp?app=dsh')
     assert.equal(state.port, 8899)
     assert.equal(state.libraryPath, libraryPath)
     assert.equal(state.mode, 'reused')
