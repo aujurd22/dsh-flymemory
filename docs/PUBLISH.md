@@ -15,6 +15,7 @@ kit for submitting to the ones that need it.
 | Clear license (SPDX) | MIT, `LICENSE` + `package.json` |
 | Version compatibility stated | DSH `0.2.0-rc.2`, verified on `44.7.0` (README) |
 | Installed as an npm package | **yes** — [`dsh-flymemory@1.0.0`](https://www.npmjs.com/package/dsh-flymemory), published 2026-10-26 |
+| Listed in awesome-dsh-plugin | **in review** — [PR #9562](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/9562), checks green 2026-10-26 |
 
 Topic scanning is the widest net: dshfind, dsh-market and similar aggregators
 crawl the `dsh-plugin` topic, so the repository is already discoverable there.
