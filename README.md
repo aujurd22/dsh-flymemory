@@ -24,6 +24,37 @@ DSH session ──┬── mcp__flymemory__*   15 tools the model can call
               $DSH_HOME/flymemory-data/flymemory_v3.pkl
 ```
 
+## Why not just a vector store
+
+Most agent "memory" plugins are a note table plus cosine search. This is a full
+store, and the differences show up in ordinary work:
+
+| | a note table + cosine search | dsh-flymemory |
+|---|---|---|
+| A fact changed | old and new both come back | `supersede` retires the old one; recall hides it unless you ask for history |
+| The same thing said twice | piles up | length-tiered dedup merges or strengthens instead |
+| "What is X *now*" | you write the query yourself | `state_key`/`state_value` keep a current value plus its chain of previous ones |
+| Age | everything looks equally fresh | power-law decay weights results by retention |
+| Where an entry came from | lost | `source` (model-judged vs mechanically captured) and `app:<name>` |
+| Several clients | one store each | ZCode, Qoder and DSH can share one store; `app=` tags say who wrote what |
+| Per-turn cost | full text or nothing | a bounded pointer index (≤1.2 KB), and the model pulls what it needs |
+| Did anyone use it | unknown | `usegate.jsonl`: every injected pointer accounted as expanded / recalled / superseded |
+
+Measured upstream, not re-run here (protocols live in the FlyMemory repo):
+
+- aggregation questions: one-shot top-5 scored **6% strict**, the "collect wide,
+  then read each entry verbatim" protocol **16%** (P-ANSWER);
+- two-hop questions: letting a retriever filter candidates first cut the evidence
+  from **100% to 75%** (P-COMBO);
+- pointer injection lifted evidence-in-pool **63.9% → 74.4%** but at **12.15×**
+  pool tokens (P-USEGATE, verdict PARTIAL) — which is exactly why this plugin
+  points at entries and never expands one by itself.
+
+What this page does **not** claim: that a memory store makes a model smarter, or
+that this recall wins on every metric. The honest summary of the upstream record
+is that *structured* memory reproduces across runs, while adaptive read policies
+have not (yet) survived independent replication.
+
 ## What you get
 
 Fifteen tools, all under the `mcp__flymemory__` prefix:
