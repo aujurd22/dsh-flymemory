@@ -259,7 +259,11 @@ node bin/flymemory.mjs log -n 40
 node bin/flymemory.mjs mute 30m     # 临时静音工作上下文（工具照常）
 node bin/flymemory.mjs mute off
 node bin/flymemory.mjs ledger       # 注入→使用率与最热 id（可加 --json）
+node bin/flymemory.mjs version      # 本机这版 vs npm 上最新
 ```
+
+**不会自动更新**：DSH 从不轮询 registry，升级就是用同一条命令再装一次
+（`dsh plugin --profile desktop add dsh-flymemory`）。`version` 告诉你有没有新版。
 
 装成 bundle 之后，同一个 CLI 会被链接到 profile 里：
 `<profile>/node_modules/.bin/dsh-flymemory`。

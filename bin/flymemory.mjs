@@ -17,6 +17,9 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import {
+  PACKAGE_NAME,
+  PACKAGE_VERSION,
+  compareVersions,
   describe,
   ensureService,
   probeEndpoint,
@@ -84,6 +87,7 @@ async function status() {
   const overridden = Boolean(state && (endpoint !== info.url || library !== info.libraryPath))
 
   console.log('dsh-flymemory status')
+  console.log(`  version         ${PACKAGE_VERSION}   (run \`dsh-flymemory version\` to compare with npm)`)
   console.log(`  endpoint        ${endpoint}`)
   if (overridden) {
     console.log(`                  resolved by the running plugin; this checkout's default is ${info.url}`)
@@ -285,10 +289,54 @@ function ledger() {
   process.exit(0)
 }
 
-const commands = { status, start, stop, log: logCommand, doctor, mute, unmute: mute, ledger }
+/**
+ * Is there a newer published version?
+ *
+ * DSH never polls the registry, so this is the check a user runs after hearing
+ * about a release. Fails soft: no network simply means "unknown".
+ */
+async function versionCommand() {
+  const installed = PACKAGE_VERSION
+  let latest = ''
+  try {
+    const response = await fetch(`https://registry.npmjs.org/${PACKAGE_NAME}`, {
+      signal: AbortSignal.timeout(8000),
+      headers: { accept: 'application/vnd.npm.install-v1+json' },
+    })
+    if (response.ok) {
+      const body = await response.json()
+      latest = String(body?.['dist-tags']?.latest || '')
+    }
+  } catch {
+    /* offline or blocked registry */
+  }
+  const delta = latest ? compareVersions(latest, installed) : 0
+  const status = !latest ? 'unknown' : delta > 0 ? 'behind' : delta < 0 ? 'ahead' : 'current'
+  if (has('--json')) {
+    console.log(JSON.stringify({ package: PACKAGE_NAME, installed, latest: latest || null, status }, null, 2))
+    process.exit(0)
+  }
+  console.log(`${PACKAGE_NAME} ${installed}  (this copy)`)
+  if (!latest) {
+    console.log('published   unknown — registry unreachable (offline or blocked)')
+    process.exit(0)
+  }
+  console.log(`published   ${latest}`)
+  if (status === 'behind') {
+    console.log('status      a newer version is available')
+    console.log(`upgrade     dsh plugin --profile <your-profile> add ${PACKAGE_NAME}`)
+  } else if (status === 'ahead') {
+    console.log('status      this copy is newer than the published one (local build)')
+  } else {
+    console.log('status      up to date')
+  }
+  process.exit(0)
+}
+
+const commands = { status, start, stop, log: logCommand, doctor, mute, unmute: mute, ledger, version: versionCommand }
 const run = commands[command]
 if (!run) {
-  console.error(`unknown command "${command}"\n\nusage: dsh-flymemory [status|start|stop|log|doctor|mute|ledger] [--port N] [--data-dir DIR] [--python PATH]`)
+  console.error(`unknown command "${command}"\n\nusage: dsh-flymemory [status|start|stop|log|doctor|mute|ledger|version] [--port N] [--data-dir DIR] [--python PATH]`)
   process.exit(2)
 }
 await run()

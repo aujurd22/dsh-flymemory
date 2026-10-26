@@ -300,7 +300,12 @@ node bin/flymemory.mjs log -n 40
 node bin/flymemory.mjs mute 30m     # silence the per-request digest (tools keep working)
 node bin/flymemory.mjs mute off
 node bin/flymemory.mjs ledger       # injection -> use rate and hottest ids (add --json)
+node bin/flymemory.mjs version      # this copy vs the published one 
 ```
+
+Nothing auto-updates: DSH never polls the registry, so `dsh plugin --profile
+<profile> add dsh-flymemory` again is the upgrade. `version` tells you whether
+one exists.
 
 After installing the bundle, the same CLI is linked into the profile at
 `<profile>/node_modules/.bin/dsh-flymemory`.

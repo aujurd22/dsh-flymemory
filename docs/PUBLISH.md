@@ -48,6 +48,43 @@ The `files` list keeps the published tarball to `lib/`, `bin/`, `python/`,
 `locale/`, `examples/`, `cordis.patch.yml`, `icon.svg` and the docs — no test
 fixtures and no memory library.
 
+## Release checklist
+
+Who notices a new version:
+
+| Layer | Detection | Do we act? |
+|---|---|---|
+| npm registry | `latest` dist-tag; the install command resolves it | publishing is the release |
+| A user's DSH | **nothing polls npm** — they re-run the install command | no |
+| dsh-plugin.org / dshopen / dsh.so | they crawl repo metadata + registry | no, syncs on its own |
+| awesome-dsh-plugin | the entry file has no version field | no (only if the description changes) |
+
+So a release is one command:
+
+```bash
+node scripts/release.mjs patch      # tests -> bump -> commit -> tag -> push -> publish -> verify
+node scripts/release.mjs minor --dry-run
+```
+
+It refuses to release a version that is not newer, prints the plan with
+`--dry-run`, and verifies the registry actually serves the new version before it
+exits. Authentication comes from npm itself (`npm login`, or
+`NPM_CONFIG_USERCONFIG=<file with a publish token>`), so the script never touches
+credentials.
+
+Two things the script cannot check, both easy to forget:
+
+- **vendored engine** — `python/flymemory/*.py` mirrors upstream. Re-syncing means
+  updating the sync point in `THIRD_PARTY_NOTICES.md` and re-checking the
+  byte-identical list;
+- **`examples/early-band.patch.yml`** pins a copy of the standard agent preset.
+  If DSH changes that preset, regenerate the example, or new preset rows stay
+  hidden behind the pinned copy.
+
+Users upgrade with the same command that installed the plugin; there is no
+auto-update. A symlinked dev install (`link:`) tracks the working tree instead,
+so reloading the plugin is enough there.
+
 ## Submission kit
 
 ### dsh-plugin.org / DSH Plugin Hub (submit form)
