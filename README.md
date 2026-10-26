@@ -55,6 +55,52 @@ that this recall wins on every metric. The honest summary of the upstream record
 is that *structured* memory reproduces across runs, while adaptive read policies
 have not (yet) survived independent replication.
 
+## The notebook, and who does the thinking
+
+The engine is easier to explain as a notebook than as an architecture.
+
+Every sentence you send gets written on its own line, so topics don't blur
+together. Say something nearly identical and the old line is underlined harder
+instead of copied twice. *Correct* something ("actually I moved to Hangzhou") and
+the old line is crossed out, not torn out — you can still read crossed-out lines
+when you ask about history. Short scribbles condense into summary notes; anything
+untouched for months fades (power law: the true half-life is 3τ, 90 days by
+default). Finding a line works two ways at once: by meaning, and by the exact
+keywords embeddings cannot see — part numbers, file paths, ids.
+
+The division of labour is the design bet: **the server never runs an LLM.** It owns
+the mechanical part — chunking, dedup, fusion, decay math, lineage hygiene,
+persistence; the calling model owns every judgment — what matters, what is
+outdated, what is worth forgetting. A wrong judgment is therefore a *recorded*
+wrong judgment: `supersede` leaves a tombstone with `valid_from`/`valid_to`
+instead of a hole.
+
+An entry's life:
+
+1. **write** — a hook captures it, or the model stores it deliberately (`source`
+   keeps the two apart);
+2. **strengthen** — a near-duplicate updates the existing entry rather than
+   adding a second copy; dedup is length-tiered and prefers *not* merging;
+3. **supersede** — `supersede(old, new)` retires an outdated state; it stays
+   queryable via `include_superseded` while normal recall skips it;
+4. **consolidate** — `consolidate(ids, conclusion)` builds a higher-level entry
+   that keeps `evidence_ids` back-links, so abstraction never destroys the raw
+   material;
+5. **fade or forget** — power-law decay prunes what nothing touches; `forget`
+   removes something that was simply wrong.
+
+The ablated versions of these rules, including the ones that measured *worse* than
+doing nothing, stay in the engine repo:
+[source](https://github.com/aujurd22/flymemory) ·
+[research ledger](https://github.com/aujurd22/flymemory/blob/main/research/RESEARCH.md).
+
+![Consolidation must overlay, never replace; anchored judgment is near-mechanical](https://raw.githubusercontent.com/aujurd22/flymemory/main/docs/img/laws.png)
+
+*Two of the engine's laws. Left: replace-style abstraction scores 10 points below
+storing nothing, so consolidation overlays instead. Right: the same 48 turns
+through two collection strategies — anchored judgment is near-mechanical,
+pre-registered paired experiment, discordant 13:0.*
+
 ## What you get
 
 Fifteen tools, all under the `mcp__flymemory__` prefix:
