@@ -2,6 +2,9 @@
 
 English | [中文](README.zh.md)
 
+[![npm](https://img.shields.io/npm/v/dsh-flymemory)](https://www.npmjs.com/package/dsh-flymemory)
+[![Listed on dsh-plugin.org](https://dsh-plugin.org/badges/listed.svg)](https://dsh-plugin.org/plugins/aujurd22/dsh-flymemory)
+
 Long-term memory for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
 
 This is a plugin (a DSH *bundle*) that runs [FlyMemory](https://github.com/aujurd22/flymemory)

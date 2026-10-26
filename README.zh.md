@@ -2,6 +2,9 @@
 
 [English](README.md) | 中文
 
+[![npm](https://img.shields.io/npm/v/dsh-flymemory)](https://www.npmjs.com/package/dsh-flymemory)
+[![Listed on dsh-plugin.org](https://dsh-plugin.org/badges/listed.svg)](https://dsh-plugin.org/plugins/aujurd22/dsh-flymemory)
+
 给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 加长期记忆。
 
 这是一个 DSH 插件（bundle）：把 [FlyMemory](https://github.com/aujurd22/flymemory)
