@@ -1,0 +1,72 @@
+# Publishing this plugin
+
+Status of the four things every DSH plugin directory checks, and the copy-paste
+kit for submitting to the ones that need it.
+
+## Checklist
+
+| Requirement | Status |
+|---|---|
+| Public GitHub repository, source visible | yes — <https://github.com/aujurd22/dsh-flymemory> |
+| `dsh-plugin` topic on the repo | yes (`dsh-plugin`, plus `dsh`, `dsh-bundle`, `deepseek-harness`, `mcp`, `memory`, `agent-memory`, `long-term-memory`, `flymemory`) |
+| README with a copyable install command | yes — `dsh plugin --profile desktop add github:aujurd22/dsh-flymemory` |
+| Plugin exports `apply(ctx)` | yes — `lib/index.js`; the bundle patch mounts it as the `flymemory` row |
+| `package.json` declares `dsh.bundle.patch` | yes — `cordis.patch.yml` |
+| Clear license (SPDX) | MIT, `LICENSE` + `package.json` |
+| Version compatibility stated | DSH `0.2.0-rc.2`, verified on `44.7.0` (README) |
+| Installed as an npm package | **not yet** — the name `dsh-flymemory` is unclaimed on npm (checked 2026-10-26) |
+
+Topic scanning is the widest net: dshfind, dsh-market and similar aggregators
+crawl the `dsh-plugin` topic, so the repository is already discoverable there.
+Being listed is not the same as being verified — hubs list new plugins as
+`unconfirmed` until someone checks them.
+
+## npm (needed by directories that require an installable package)
+
+Requires an npm account token; this repo has not been published yet.
+
+```bash
+npm login                     # or: export NPM_TOKEN=...
+npm publish --access public   # name: dsh-flymemory (unclaimed at time of writing)
+```
+
+The `files` list keeps the published tarball to `lib/`, `bin/`, `python/`,
+`locale/`, `examples/`, `cordis.patch.yml`, `icon.svg` and the docs — roughly
+300 KB, no test fixtures, no memory library.
+
+## Submission kit
+
+### dsh-plugin.org / DSH Plugin Hub (submit form)
+
+Requirements: public repo + topic + install command + `apply(ctx)`. All met.
+Listing text:
+
+> **Name:** dsh-flymemory
+> **One-liner:** Long-term memory for DeepSeek Harness — 15 memory tools, automatic recall/capture, and a private local engine, with the context kept in a band.
+> **What changes after install:** the model gets `mcp__flymemory__*` tools for storing, searching, superseding and consolidating memory; every typed prompt is captured and relevant memories are recalled into the turn; a bounded memory index is published per request; compaction checkpoints are archived back into the store.
+> **Requirements:** Python 3.10+ with torch + sentence-transformers; a base-backed profile.
+> **Compatibility:** DSH 0.2.0-rc.2, verified on 44.7.0.
+
+### dshopen.org (Open Plugin Market — GitHub issue)
+
+Issue title: `[plugin] dsh-flymemory — long-term memory for DSH`
+Body: the one-liner and "what changes after install" above, plus the repo URL,
+license, npm name (once published) and the install command.
+
+### awesome-dsh-plugin (pull request)
+
+Add `data/plugins/aujurd22__dsh-flymemory.yml`, following that repository's
+`CONTRIBUTING.md` schema (fetch it before opening the PR; it can change). Then PR
+with the description: "add dsh-flymemory (long-term memory plugin, MIT)".
+
+### dsh.so / dshmarketplace.dev
+
+Both accept a repository URL (or npm package name) and run an automated
+scan — no PR needed. Paste <https://github.com/aujurd22/dsh-flymemory>.
+
+## After listing
+
+- Keep the compatibility note in the README current; preview releases move.
+- The directories sync stars, description and README automatically, so the repo
+  `description` is the listing card — keep it a one-line value statement.
+- A listing badge can be added to the README once a listing URL exists.

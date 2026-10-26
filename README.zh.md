@@ -67,14 +67,29 @@ DSH 会话 ──┬── mcp__flymemory__*   模型可调的 15 个工具
 
 ## 安装
 
-用 `plugin_manager` 指向本目录（绝对路径）：
+```bash
+# 从 GitHub 安装（插件市场文档里的标准形态；profile 名换成你自己的）
+dsh plugin --profile desktop add github:aujurd22/dsh-flymemory
+
+# 从本地目录安装（绝对路径）
+dsh plugin --profile desktop add /absolute/path/to/dsh-flymemory
+```
+
+或者在会话里用 `plugin_manager` 工具指向同一个 spec：
 
 ```
+plugin_manager(action: "install_bundle", target: "github:aujurd22/dsh-flymemory")
 plugin_manager(action: "install_bundle", target: "/absolute/path/to/dsh-flymemory")
 ```
 
 或者打开 Web 侧边栏的 **Plugins** 页面，选这个文件夹。harness 重新加载后会有两行
 插件起来（`flymemory`、`flymemory-mcp`），工具就出现了。
+
+**信任信息。** 许可证 MIT；适用于任何 base-backed profile（`desktop`/`web`）；
+按 DSH `0.2.0-rc.2` 编写、在 `44.7.0` 上验证。权限范围：只在 `$DSH_HOME` 下写一个数据
+目录、拉起一个 Python 子进程、并且只走 `127.0.0.1` 本机通信——不需要任何凭据，也没有
+对外网络请求。外部依赖：Python 3.10+ 及 torch / sentence-transformers（见上）；引擎已随包，
+不需要另外 clone FlyMemory。
 
 自检：
 

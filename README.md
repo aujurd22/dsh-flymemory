@@ -72,14 +72,32 @@ Both hooks are silent when the service is down, and neither can block a turn.
 
 ## Install
 
-Point `plugin_manager` at this directory (absolute path):
+```bash
+# from GitHub (the form plugin hubs document; use your own profile name)
+dsh plugin --profile desktop add github:aujurd22/dsh-flymemory
+
+# from a local checkout (absolute path)
+dsh plugin --profile desktop add /absolute/path/to/dsh-flymemory
+```
+
+Or, from inside an agent session, point the `plugin_manager` tool at the same
+spec:
 
 ```
+plugin_manager(action: "install_bundle", target: "github:aujurd22/dsh-flymemory")
 plugin_manager(action: "install_bundle", target: "/absolute/path/to/dsh-flymemory")
 ```
 
 Or use the **Plugins** page in the Web sidebar and pick the folder. The harness
 reloads, two rows come up (`flymemory`, `flymemory-mcp`), and the tools appear.
+
+**Trust signals.** License: MIT. Profile: any base-backed profile
+(`desktop`/`web`); written against DSH `0.2.0-rc.2` and verified on `44.7.0`.
+Permissions: it writes one data directory under `$DSH_HOME`, starts a Python
+child process, and talks to it over `127.0.0.1` only — no credentials required
+and no outbound network calls. External requirement: Python 3.10+ with torch and
+sentence-transformers (see above); the engine is vendored, so no separate
+FlyMemory checkout is needed.
 
 Check it:
 
