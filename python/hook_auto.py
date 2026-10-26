@@ -59,8 +59,12 @@ def main():
                 or "KIKO 6 小时陪伴教育到点检查" in head):
             return
         # 凭据永不入库：token 密钥一旦进入记忆库，会被召回注入未来所有会话
-        if any(pat in prompt for pat in ("ghp_", "github_pat_", "pypi-AgEI", "sk-ant-", "sk-proj-",
-                                         "AKIA", "-----BEGIN", "xoxb-", "xoxp-")):
+        # dsh-flymemory: "npm_"/"glpat-"/"pypi-"/"AIza"/"hf_"/"sk_live_" added
+        # after a pasted npm publish token reached the store (2026-10-26).
+        if any(pat in prompt for pat in ("ghp_", "github_pat_", "gho_", "glpat-",
+                                         "pypi-AgEI", "pypi-", "sk-ant-", "sk-proj-",
+                                         "sk_live_", "AKIA", "-----BEGIN", "xoxb-",
+                                         "xoxp-", "xoxa-", "npm_", "hf_", "AIza")):
             return
         body = json.dumps({
             "jsonrpc": "2.0", "id": 1, "method": "tools/call",

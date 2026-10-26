@@ -22,6 +22,7 @@ import {
   renderWorkingContext,
   writeMute,
 } from '../lib/context.js'
+import { isSkippableText } from '../lib/index.js'
 
 const PACK = [
   'RECENT SESSION TRAIL (oldest → newest):',
@@ -312,5 +313,17 @@ describe('mute switch', () => {
     assert.equal(readMute(dir, now + 31 * 60000), null, 'an expired mute stops counting')
     writeMute(dir, 0, now)
     assert.equal(readMute(dir, now), null)
+  })
+})
+
+describe('credential filter covers registry tokens', () => {
+  it('drops npm / gitlab / pypi / google / hf tokens', () => {
+    // Synthetic sample: real tokens must never appear in this repository.
+    assert.equal(isSkippableText('npm_FAKEtoken0123456789abcdef'), true)
+    assert.equal(isSkippableText('here is my token glpat-AbCdEf123456'), true)
+    assert.equal(isSkippableText('pypi-AgEIcHlwaS5vcmc'), true)
+    assert.equal(isSkippableText('AIzaSyD-1234567890abcdef'), true)
+    assert.equal(isSkippableText('hf_abcdefghijklmnop'), true)
+    assert.equal(isSkippableText('ordinary sentence about npm packages'), false)
   })
 })
