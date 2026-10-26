@@ -35,17 +35,17 @@ const bumpArg = argv.find((arg) => !arg.startsWith('-')) || 'patch'
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-function run(command, args, { inherit = false } = {}) {
+function run(command, args, { inherit = false, shell = false } = {}) {
   const line = [command, ...args].join(' ')
   if (dryRun) {
     console.log(`    (dry) ${line}`)
     return ''
   }
   if (inherit) {
-    execFileSync(command, args, { cwd: root, stdio: 'inherit' })
+    execFileSync(command, args, { cwd: root, stdio: 'inherit', shell })
     return ''
   }
-  return execFileSync(command, args, { cwd: root, encoding: 'utf8' }).trim()
+  return execFileSync(command, args, { cwd: root, encoding: 'utf8', shell }).trim()
 }
 
 function bumpVersion(version, kind) {
@@ -100,7 +100,9 @@ run('git', ['push', 'origin', `v${next}`])
 
 if (!noPublish) {
   console.log('- npm publish')
-  run(npmCmd, ['publish', '--access', 'public'], { inherit: true })
+  // Windows cannot spawn the `npm.cmd` shim directly (EINVAL), so this one call
+  // goes through a shell; every argument is a plain flag, nothing to quote.
+  run(npmCmd, ['publish', '--access', 'public'], { inherit: true, shell: process.platform === 'win32' })
 
   console.log('- waiting for the registry')
   const deadline = Date.now() + 4 * 60 * 1000
