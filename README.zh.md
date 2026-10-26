@@ -153,6 +153,7 @@ harness 启动时第一行先探 `127.0.0.1:8791`：已经有 FlyMemory 服务�
     workingContext: true        # 每请求发布一份有界的记忆摘要
     workingContextChars: 1200   # 摘要上限（含包裹标签）
     workingContextMinutes: 240  # 摘要往回看多久
+    useGate: true               # 记录「注入的指针有没有被展开/再召/取代」
     writeHooksConfig: true      # 同时给 DSH 之外的客户端写 hooks.json
     seedFromUpstream: false     # 默认不导入别的库
     upstreamLibrary: ''         # 想导入就同时配这两项
@@ -178,6 +179,9 @@ harness 启动时第一行先探 `127.0.0.1:8791`：已经有 FlyMemory 服务�
 node bin/flymemory.mjs start
 node bin/flymemory.mjs stop
 node bin/flymemory.mjs log -n 40
+node bin/flymemory.mjs mute 30m     # 临时静音工作上下文（工具照常）
+node bin/flymemory.mjs mute off
+node bin/flymemory.mjs ledger       # 注入→使用率与最热 id（可加 --json）
 ```
 
 装成 bundle 之后，同一个 CLI 会被链接到 profile 里：
@@ -211,19 +215,29 @@ node bin/flymemory.mjs log -n 40
 
 ## 让上下文待在一个区间里
 
-不该等到窗口塞满才开始处理。三件事让每个请求都小、且该在的东西都在：
+不该等到窗口塞满才开始处理。四件事让每个请求都小、且该在的东西都在：
 
-**1. 工作上下文（内置）。** 每次请求，插件把一份有界的记忆摘要作为 prompt
-*context* 发出去——`<working-context source="flymemory">`，最多 1.2KB，最多每 45 秒
-从 `flymemory_session_pack` 刷新一次。它带近期轨迹和已有结论，所以即使逐字窗口被裁掉，
-模型仍从「当前状态」起步。它是 optional context：运行时抑制器可以去掉它；记忆服务挂了
-就沿用上一份摘要，不会报错。
+**1. 工作上下文是「索引」，不是记忆倾倒。** 每次请求插件发
+`<working-context source="flymemory" type="index">`：最多 1.2KB 的指针
+（`#id | 年龄 | 来源 | 一行`），最多每 45 秒从 `flymemory_session_pack` 刷新，块头明确
+写着「要读正文请先 `flymemory_get_memory(id)`」。正文由模型自己拉，插件**从不替它展开**。
+这个分工是被测出来的：上游 P-USEGATE（2026-10-26）里指针形态的证据覆盖 +10.5pp，只在
+「指针被跟着展开」时成立，而那次展开把池 token 推到 **12.15 倍**——所以展开始终是模型的
+决定。它是 optional context：运行时抑制器能去掉、`dsh-flymemory mute` 能临时静音、服务挂了
+就沿用上一份摘要。
 
-**2. 压缩结果回到记忆里。** 会话写入 `compaction/summary` 时，摘要文本会被存成
+**2. use_gate 记账。** 每个真正进入 prompt 的指针 id 会按会话记进
+`<dataDir>/usegate.jsonl`（一行一个事件，结构对齐上游的 `injected id -> uses`）。之后模型
+调 `flymemory_get_memory` / 召回 / `flymemory_supersede`，就分别记成
+`expanded` / `recalled` / `superseded`。`dsh-flymemory ledger` 给出
+**注入→使用率**和最热 id——这正是上游采纳的那块账本（补上「注入过，但没人记录到底用没用」
+的缺口）。
+
+**3. 压缩结果回到记忆里。** 会话写入 `compaction/summary` 时，摘要文本会被存成
 `context` 分区下的 `checkpoint,compaction` 条目。被压缩的历史仍然可召回，而且权威在库里，
 不是只剩一份检查点。
 
-**3. 早触发压缩（可选）。** DSH 的 `compaction-basic` 行在 agent preset 里，改阈值只能
+**4. 早触发压缩（可选）。** DSH 的 `compaction-basic` 行在 agent preset 里，改阈值只能
 整段重述 preset。[`examples/early-band.patch.yml`](examples/early-band.patch.yml) 就是
 干这个的，只改三个数：窗口到 **45%** 就压（原来 80%）、保留 **12%** 逐字（原来 16%）、
 headroom 调小以便小窗口也合法。把它贴进你的 profile patch 即可。它会**钉住一份 preset

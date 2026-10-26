@@ -26,6 +26,7 @@ import {
   resolveOptions,
   stopEngine,
 } from '../lib/index.js'
+import { readMute, writeMute } from '../lib/context.js'
 
 const argv = process.argv.slice(2)
 const command = (argv[0] || 'status').toLowerCase()
@@ -33,6 +34,7 @@ const flag = (name, fallback = undefined) => {
   const index = argv.indexOf(name)
   return index === -1 ? fallback : argv[index + 1]
 }
+const has = (name) => argv.includes(name)
 
 const config = {}
 if (flag('--port')) config.port = Number(flag('--port'))
@@ -94,6 +96,11 @@ async function status() {
   console.log(`  interpreter     ${info.pythonExe || 'NOT FOUND'}${info.pythonExe ? (info.pythonVerified ? '  (sentence_transformers available)' : '  (sentence_transformers NOT found)') : ''}`)
   console.log(`  engine script   ${info.scriptExists ? info.scriptPath : `MISSING (${info.scriptPath})`}`)
   console.log(`  hooks config    ${existsSync(info.hooksConfigPath) ? info.hooksConfigPath : 'not written yet'}`)
+  const mute = readMute(info.dataDir)
+  console.log(`  working ctx     ${mute
+    ? `MUTED for ${mute.min} more min (until ${new Date(mute.until).toLocaleString()}) — run \`dsh-flymemory mute off\``
+    : 'active — bounded pointer index, published per request'}`)
+  console.log(`  use_gate        ${existsSync(join(info.dataDir, 'usegate.jsonl')) ? join(info.dataDir, 'usegate.jsonl') : 'no ledger yet'}`)
 
   if (existsSync(profileManifest)) {
     try {
@@ -188,10 +195,100 @@ async function doctor() {
   process.exit(1)
 }
 
-const commands = { status, start, stop, log: logCommand, doctor }
+/** `30m` / `2h` / `90s` / bare minutes -> milliseconds, or null when unparseable. */
+function parseDuration(value) {
+  if (!value) return 30 * 60 * 1000
+  const match = String(value).trim().toLowerCase().match(/^(\d+(?:\.\d+)?)\s*(s|m|h|d)?$/)
+  if (!match) return null
+  const scale = { s: 1000, m: 60000, h: 3600000, d: 86400000 }[match[2] || 'm']
+  return Number(match[1]) * scale
+}
+
+/** Silence the per-request working context without restarting the harness. */
+function mute() {
+  const argument = argv[1]
+  if (argument === 'off' || argument === 'none' || argument === '0') {
+    writeMute(options.dataDir, 0)
+    console.log('working context unmuted')
+    process.exit(0)
+  }
+  const duration = parseDuration(argument)
+  if (duration === null) {
+    console.error(`usage: dsh-flymemory mute [30m|2h|90s|off]   (got "${argument}")`)
+    process.exit(2)
+  }
+  const until = Date.now() + duration
+  const path = writeMute(options.dataDir, until)
+  if (!path) {
+    console.log('working context unmuted')
+    process.exit(0)
+  }
+  console.log(`working context muted for ${Math.round(duration / 60000)} min (until ${new Date(until).toLocaleString()})`)
+  console.log('capture and the memory tools keep working; only the per-request digest stops.')
+  console.log(`state file: ${path}`)
+  process.exit(0)
+}
+
+/**
+ * use_gate report over `<dataDir>/usegate.jsonl`.
+ *
+ * Mirrors the upstream bench's numbers: distinct injected ids, how many were
+ * used, the breakdown by kind, and the hottest ids.
+ */
+function ledger() {
+  const path = join(info.dataDir, 'usegate.jsonl')
+  const entries = new Map()
+  try {
+    for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
+      if (!line.trim()) continue
+      let row
+      try { row = JSON.parse(line) } catch { continue }
+      if (!row || row.id === undefined) continue
+      const key = `${row.session ?? 'unknown'}|${row.id}`
+      const entry = entries.get(key) ?? { session: row.session ?? 'unknown', id: row.id, count: 0, events: new Set() }
+      if (row.event === 'injected') entry.count += 1
+      entry.events.add(row.event)
+      entries.set(key, entry)
+    }
+  } catch {
+    console.log('no ledger yet — the plugin writes it once pointers are injected')
+    process.exit(0)
+  }
+  const rows = [...entries.values()]
+  const used = rows.filter((row) => row.events.has('expanded') || row.events.has('recalled') || row.events.has('superseded'))
+  const hot = new Map()
+  for (const row of rows) hot.set(row.id, (hot.get(row.id) || 0) + row.count)
+  const summary = {
+    file: path,
+    sessions: new Set(rows.map((row) => row.session)).size,
+    injected: rows.length,
+    used: used.length,
+    useRate: rows.length === 0 ? 0 : Number((used.length / rows.length).toFixed(3)),
+    expanded: rows.filter((row) => row.events.has('expanded')).length,
+    recalled: rows.filter((row) => row.events.has('recalled')).length,
+    superseded: rows.filter((row) => row.events.has('superseded')).length,
+    hot: [...hot.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([id, count]) => ({ id, count })),
+  }
+  if (has('--json')) {
+    console.log(JSON.stringify(summary, null, 2))
+    process.exit(0)
+  }
+  console.log('dsh-flymemory use_gate ledger')
+  console.log(`  file            ${summary.file}`)
+  console.log(`  sessions        ${summary.sessions}`)
+  console.log(`  injected ids    ${summary.injected}`)
+  console.log(`  used            ${summary.used}  (rate ${(summary.useRate * 100).toFixed(1)}%)`)
+  console.log(`    expanded      ${summary.expanded}`)
+  console.log(`    re-called     ${summary.recalled}`)
+  console.log(`    superseded    ${summary.superseded}`)
+  if (summary.hot.length) console.log(`  hottest         ${summary.hot.map((hit) => `#${hit.id}x${hit.count}`).join(', ')}`)
+  process.exit(0)
+}
+
+const commands = { status, start, stop, log: logCommand, doctor, mute, unmute: mute, ledger }
 const run = commands[command]
 if (!run) {
-  console.error(`unknown command "${command}"\n\nusage: dsh-flymemory [status|start|stop|log|doctor] [--port N] [--data-dir DIR] [--python PATH]`)
+  console.error(`unknown command "${command}"\n\nusage: dsh-flymemory [status|start|stop|log|doctor|mute|ledger] [--port N] [--data-dir DIR] [--python PATH]`)
   process.exit(2)
 }
 await run()

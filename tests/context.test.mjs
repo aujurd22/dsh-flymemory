@@ -14,8 +14,13 @@ import {
   WORKING_CONTEXT_NAME,
   checkpointTextOf,
   createContextBand,
+  createUseGate,
+  pointerIdsOf,
+  readMute,
   registerContextBand,
+  registerUseGate,
   renderWorkingContext,
+  writeMute,
 } from '../lib/context.js'
 
 const PACK = [
@@ -46,6 +51,7 @@ const options = (extra = {}) => ({
   checkpointContract: true,
   contractOrder: 12000,
   archiveCheckpoints: true,
+  useGate: true,
   hookTimeoutMs: 6000,
   ...extra,
 })
@@ -203,5 +209,108 @@ describe('registerContextBand', () => {
     assert.deepEqual(injected, [])
     assert.equal(contexts.length, 0)
     assert.equal(sections.length, 0)
+  })
+})
+
+describe('pointer index form', () => {
+  it('marks the block as an index and tells the model how to read an entry', () => {
+    const text = renderWorkingContext(PACK)
+    assert.match(text, /type="index"/)
+    assert.match(text, /flymemory_get_memory/)
+  })
+
+  it('extracts exactly the ids it pointed at', () => {
+    assert.deepEqual(pointerIdsOf('[#12 | a]\n[#7 | b]\n[#12 | c]'), [12, 7])
+    assert.deepEqual(pointerIdsOf('no pointers here'), [])
+    assert.deepEqual(pointerIdsOf(''), [])
+  })
+})
+
+describe('createContextBand with mute', () => {
+  it('serves nothing and refreshes nothing while muted', async () => {
+    let calls = 0
+    const band = createContextBand(options(), {
+      fetchDigest: async () => { calls += 1; return PACK },
+      isMuted: () => true,
+    })
+    assert.equal(await band.refresh('a'), false)
+    assert.equal(calls, 0)
+    assert.equal(band.textFor({}), '')
+  })
+
+  it('reports the injected pointers to the ledger', async () => {
+    const injected = []
+    const band = createContextBand(options(), {
+      fetchDigest: async () => PACK,
+      onInjected: (session, ids) => injected.push([session, ids]),
+    })
+    await band.refresh('agent-1')
+    assert.deepEqual(injected, [['agent-1', [9001, 9002, 8990]]])
+  })
+})
+
+describe('use_gate ledger', () => {
+  it('accounts injection, expansion, re-call and supersede', () => {
+    const rows = []
+    let clock = 1000
+    const gate = createUseGate({}, { append: (record) => rows.push(record), now: () => clock })
+    gate.injected('s1', [11, 12])
+    clock = 2000
+    assert.equal(gate.observe({ session: 's1', toolName: 'flymemory_get_memory', args: { memory_id: 12 } }), 1)
+    assert.equal(gate.observe({ session: 's1', toolName: 'flymemory_recall', args: {}, resultText: '[#11 | x]' }), 1)
+    // ids never shown, repeats, and other sessions are not injections->uses
+    assert.equal(gate.observe({ session: 's1', toolName: 'flymemory_get_memory', args: { memory_id: 99 } }), 0)
+    assert.equal(gate.observe({ session: 's1', toolName: 'flymemory_get_memory', args: { memory_id: 12 } }), 0)
+    assert.equal(gate.observe({ session: 'other', toolName: 'flymemory_get_memory', args: { memory_id: 11 } }), 0)
+
+    const stats = gate.stats()
+    assert.equal(stats.injected, 2)
+    assert.equal(stats.used, 2)
+    assert.equal(stats.expanded, 1)
+    assert.equal(stats.recalled, 1)
+    assert.equal(stats.useRate, 1)
+    assert.deepEqual(stats.hot.map((hit) => hit.id).includes(11), true)
+    assert.equal(rows.filter((row) => row.event === 'injected').length, 2)
+    assert.deepEqual(rows.filter((row) => row.event !== 'injected').map((row) => row.event).sort(), ['expanded', 'recalled'])
+  })
+
+  it('reports supersede against the pointer it replaced', () => {
+    const rows = []
+    const gate = createUseGate({}, { append: (record) => rows.push(record) })
+    gate.injected('s', [3])
+    gate.observe({ session: 's', toolName: 'flymemory_supersede', args: { old_memory_id: 3, new_memory_id: 4 } })
+    assert.equal(gate.stats().superseded, 1)
+    assert.equal(gate.bySession()[0].used, 1)
+  })
+
+  it('attributes tool results through the tools/result listener', () => {
+    const rows = []
+    const handlers = {}
+    const ctx = { on: (name, fn) => { handlers[name] = fn; return () => {} } }
+    const gate = createUseGate(options(), { append: (record) => rows.push(record) })
+    registerUseGate(ctx, options(), gate, { warn() {} })
+    gate.injected('s', [5])
+    // Through the MCP bridge the name is mcp__<server>__<rawName>.
+    handlers['tools/result'](
+      { agent: { id: 's' }, name: 'mcp__flymemory__flymemory_get_memory', arguments: { memory_id: 5 } },
+      { content: [{ type: 'text', text: 'full body' }] },
+    )
+    assert.equal(rows.filter((row) => row.event === 'expanded' && row.id === 5).length, 1)
+  })
+})
+
+describe('mute switch', () => {
+  it('writes, reads, expires and clears', () => {
+    const dir = join(scratch, 'mute-state')
+    const now = 1_000_000
+    assert.equal(readMute(dir, now), null)
+    const path = writeMute(dir, now + 30 * 60000, now)
+    assert.ok(path && path.endsWith('mute.json'))
+    const state = readMute(dir, now + 60000)
+    assert.ok(state)
+    assert.equal(state.min, 29)
+    assert.equal(readMute(dir, now + 31 * 60000), null, 'an expired mute stops counting')
+    writeMute(dir, 0, now)
+    assert.equal(readMute(dir, now), null)
   })
 })

@@ -166,6 +166,7 @@ patch entry replaces the whole `config`, so write out everything you need:
     workingContext: true        # publish a bounded memory digest per request
     workingContextChars: 1200   # cap for that digest, wrapper included
     workingContextMinutes: 240  # how far back the digest looks
+    useGate: true               # account injected pointers -> expansions/re-calls
     writeHooksConfig: true      # also write hooks.json for clients outside DSH
     seedFromUpstream: false     # don't import another library implicitly
     upstreamLibrary: ''         # set both to import one, once
@@ -194,6 +195,9 @@ To run the service on its own, without the harness:
 node bin/flymemory.mjs start
 node bin/flymemory.mjs stop
 node bin/flymemory.mjs log -n 40
+node bin/flymemory.mjs mute 30m     # silence the per-request digest (tools keep working)
+node bin/flymemory.mjs mute off
+node bin/flymemory.mjs ledger       # injection -> use rate and hottest ids (add --json)
 ```
 
 After installing the bundle, the same CLI is linked into the profile at
@@ -232,24 +236,35 @@ If you'd rather have the tools and no automation, turn the hooks off on the row
 
 ## Keeping context in a band
 
-A session should not have to fill the window before anything happens. Three
-pieces keep each request small and keep what matters available:
+A session should not have to fill the window before anything happens. Four
+pieces keep each request small and keep what matters available.
 
-**1. The working context (built in).** On every request the plugin publishes a
-bounded digest from the memory service as a prompt *context* —
-`<working-context source="flymemory">`, at most 1.2 KB, refreshed at most every
-45 seconds from `flymemory_session_pack`. It carries the recent trail and the
-standing conclusions, so even after the verbatim window is trimmed the model
-still starts from the state that matters. It is optional context: a runtime
-suppressor can drop it, and a memory outage just leaves the previous digest in
-place.
+**1. The working context is an index, not a memory dump.** On every request the
+plugin publishes `<working-context source="flymemory" type="index">`: at most
+1.2 KB of pointers (`#id | age | app | one line`), refreshed at most every 45
+seconds from `flymemory_session_pack`, with the header saying to call
+`flymemory_get_memory(id)` before acting on one. The model pulls the full text;
+the plugin never expands a pointer itself. That split is deliberate — upstream
+measured the pointer form at +10.5pp evidence coverage **only when the pointer
+was followed by an expansion**, and that expansion cost 12.15× pool tokens
+(P-USEGATE, 2026-10-26), so expansion stays a model decision. The context is
+optional: a runtime suppressor can drop it, `dsh-flymemory mute` silences it for
+a while, and a memory outage just leaves the previous digest in place.
 
-**2. Condensation goes back to memory.** When the session logs a
+**2. use_gate accounting.** Every pointer id that reaches the prompt is stamped
+into a per-session ledger (`<dataDir>/usegate.jsonl`, one JSON line per event,
+shaped like upstream's `injected id -> uses`). A later `flymemory_get_memory`,
+recall or `flymemory_supersede` is attributed to it as `expanded`, `recalled` or
+`superseded`. `dsh-flymemory ledger` reports the injection→use rate and the
+hottest ids — the measurement upstream adopted (it closes the "injected, but
+nobody records whether it was ever used" gap).
+
+**3. Condensation goes back to memory.** When the session logs a
 `compaction/summary`, its text is stored as a `checkpoint,compaction` entry in
 the `context` compartment. The condensed history stays recallable, and the store
 remains the authority rather than the checkpoint being the only copy.
 
-**3. Early compaction (opt-in).** DSH's `compaction-basic` row lives inside the
+**4. Early compaction (opt-in).** DSH's `compaction-basic` row lives inside the
 agent preset, so its threshold can only be changed by restating the preset.
 [`examples/early-band.patch.yml`](examples/early-band.patch.yml) does that with
 three numbers: compact at **45%** of the window instead of 80%, keep **12%**
