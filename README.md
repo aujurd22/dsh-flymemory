@@ -73,7 +73,10 @@ Both hooks are silent when the service is down, and neither can block a turn.
 ## Install
 
 ```bash
-# from GitHub (the form plugin hubs document; use your own profile name)
+# from npm (published 2026-10-26)
+dsh plugin --profile desktop add dsh-flymemory
+
+# from GitHub (use your own profile name)
 dsh plugin --profile desktop add github:aujurd22/dsh-flymemory
 
 # from a local checkout (absolute path)
@@ -84,6 +87,7 @@ Or, from inside an agent session, point the `plugin_manager` tool at the same
 spec:
 
 ```
+plugin_manager(action: "install_bundle", target: "dsh-flymemory")
 plugin_manager(action: "install_bundle", target: "github:aujurd22/dsh-flymemory")
 plugin_manager(action: "install_bundle", target: "/absolute/path/to/dsh-flymemory")
 ```

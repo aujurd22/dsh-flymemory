@@ -68,7 +68,10 @@ DSH 会话 ──┬── mcp__flymemory__*   模型可调的 15 个工具
 ## 安装
 
 ```bash
-# 从 GitHub 安装（插件市场文档里的标准形态；profile 名换成你自己的）
+# 从 npm 安装（2026-10-26 已发布）
+dsh plugin --profile desktop add dsh-flymemory
+
+# 从 GitHub 安装（profile 名换成你自己的）
 dsh plugin --profile desktop add github:aujurd22/dsh-flymemory
 
 # 从本地目录安装（绝对路径）
@@ -78,6 +81,7 @@ dsh plugin --profile desktop add /absolute/path/to/dsh-flymemory
 或者在会话里用 `plugin_manager` 工具指向同一个 spec：
 
 ```
+plugin_manager(action: "install_bundle", target: "dsh-flymemory")
 plugin_manager(action: "install_bundle", target: "github:aujurd22/dsh-flymemory")
 plugin_manager(action: "install_bundle", target: "/absolute/path/to/dsh-flymemory")
 ```

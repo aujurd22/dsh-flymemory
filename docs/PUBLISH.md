@@ -9,30 +9,43 @@ kit for submitting to the ones that need it.
 |---|---|
 | Public GitHub repository, source visible | yes — <https://github.com/aujurd22/dsh-flymemory> |
 | `dsh-plugin` topic on the repo | yes (`dsh-plugin`, plus `dsh`, `dsh-bundle`, `deepseek-harness`, `mcp`, `memory`, `agent-memory`, `long-term-memory`, `flymemory`) |
-| README with a copyable install command | yes — `dsh plugin --profile desktop add github:aujurd22/dsh-flymemory` |
+| README with a copyable install command | yes — `dsh plugin --profile desktop add dsh-flymemory` |
 | Plugin exports `apply(ctx)` | yes — `lib/index.js`; the bundle patch mounts it as the `flymemory` row |
 | `package.json` declares `dsh.bundle.patch` | yes — `cordis.patch.yml` |
 | Clear license (SPDX) | MIT, `LICENSE` + `package.json` |
 | Version compatibility stated | DSH `0.2.0-rc.2`, verified on `44.7.0` (README) |
-| Installed as an npm package | **not yet** — the name `dsh-flymemory` is unclaimed on npm (checked 2026-10-26) |
+| Installed as an npm package | **yes** — [`dsh-flymemory@1.0.0`](https://www.npmjs.com/package/dsh-flymemory), published 2026-10-26 |
 
 Topic scanning is the widest net: dshfind, dsh-market and similar aggregators
 crawl the `dsh-plugin` topic, so the repository is already discoverable there.
 Being listed is not the same as being verified — hubs list new plugins as
 `unconfirmed` until someone checks them.
 
-## npm (needed by directories that require an installable package)
+## npm
 
-Requires an npm account token; this repo has not been published yet.
+Published: [`dsh-flymemory@1.0.0`](https://www.npmjs.com/package/dsh-flymemory)
+(2026-10-26, 243 KB unpacked, 23 files). Verified by installing it into a clean
+directory and importing `lib/index.js` from the installed copy.
+
+Releasing a new version:
 
 ```bash
-npm login                     # or: export NPM_TOKEN=...
-npm publish --access public   # name: dsh-flymemory (unclaimed at time of writing)
+npm version patch          # or minor / major — updates package.json + git tag
+npm publish --access public
 ```
 
+Publishing needs either a one-time password (`--otp=<code>`) or a **granular
+access token with "Bypass 2FA" checked and `Read and write (publish and stage)`**
+permission. npm is retiring direct publishing with bypass-2FA tokens in January
+2027; after that, use `npm stage publish` plus approval, or Trusted Publishing.
+
+Note: the registry lists a `0.0.0-stage` placeholder version. npm creates it as
+part of the staged-publish bookkeeping; `latest` points at the real release and
+the placeholder is not installed.
+
 The `files` list keeps the published tarball to `lib/`, `bin/`, `python/`,
-`locale/`, `examples/`, `cordis.patch.yml`, `icon.svg` and the docs — roughly
-300 KB, no test fixtures, no memory library.
+`locale/`, `examples/`, `cordis.patch.yml`, `icon.svg` and the docs — no test
+fixtures and no memory library.
 
 ## Submission kit
 
