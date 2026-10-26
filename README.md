@@ -163,6 +163,9 @@ patch entry replaces the whole `config`, so write out everything you need:
     shutdownOnDispose: true     # stop the engine this activation started
     nativeHooks: true           # recall/capture on every typed prompt
     hookTimeoutMs: 6000         # budget per hook request
+    workingContext: true        # publish a bounded memory digest per request
+    workingContextChars: 1200   # cap for that digest, wrapper included
+    workingContextMinutes: 240  # how far back the digest looks
     writeHooksConfig: true      # also write hooks.json for clients outside DSH
     seedFromUpstream: false     # don't import another library implicitly
     upstreamLibrary: ''         # set both to import one, once
@@ -226,6 +229,51 @@ If you'd rather have the tools and no automation, turn the hooks off on the row
     port: 8791
     nativeHooks: false
 ```
+
+## Keeping context in a band
+
+A session should not have to fill the window before anything happens. Three
+pieces keep each request small and keep what matters available:
+
+**1. The working context (built in).** On every request the plugin publishes a
+bounded digest from the memory service as a prompt *context* —
+`<working-context source="flymemory">`, at most 1.2 KB, refreshed at most every
+45 seconds from `flymemory_session_pack`. It carries the recent trail and the
+standing conclusions, so even after the verbatim window is trimmed the model
+still starts from the state that matters. It is optional context: a runtime
+suppressor can drop it, and a memory outage just leaves the previous digest in
+place.
+
+**2. Condensation goes back to memory.** When the session logs a
+`compaction/summary`, its text is stored as a `checkpoint,compaction` entry in
+the `context` compartment. The condensed history stays recallable, and the store
+remains the authority rather than the checkpoint being the only copy.
+
+**3. Early compaction (opt-in).** DSH's `compaction-basic` row lives inside the
+agent preset, so its threshold can only be changed by restating the preset.
+[`examples/early-band.patch.yml`](examples/early-band.patch.yml) does that with
+three numbers: compact at **45%** of the window instead of 80%, keep **12%**
+verbatim instead of 16%, and a smaller headroom so small windows are valid. Paste
+it into your profile patch. It pins a copy of the preset declaration — regenerate
+it after a DSH upgrade instead of letting it go stale.
+
+What this deliberately does *not* do: it does not replace DSH's compaction
+backend, and cannot — a zero-dependency plugin cannot import
+`@deepseek-ai/dsh-compaction`. So the condensing itself stays DSH's, driven
+earlier by the preset change, while FlyMemory owns what the model sees every turn
+and keeps whatever was condensed.
+
+Prior art this borrows from:
+
+- [MemGPT / Letta (arXiv 2310.08560)](https://arxiv.org/abs/2310.08560) — treat
+  the context window as RAM and an external store as disk, paging explicitly
+  between them.
+- InfiAgent ([ACL Anthology](https://aclanthology.org/people/li-ming/)) — keep the
+  reasoning context bounded by rebuilding it from a state snapshot plus a fixed
+  recent window, instead of compressing only on overflow.
+- [Chroma's "context rot" measurements](https://research.trychroma.com/context-rot)
+  — long contexts degrade; prefer fewer, higher-signal tokens over a bigger
+  window.
 
 ## Importing a library you already have
 

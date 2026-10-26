@@ -19,6 +19,7 @@
     "bin",
     "python",
     "locale",
+    "examples",
     "cordis.patch.yml",
     "icon.svg",
     "README.md",

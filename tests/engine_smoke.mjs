@@ -103,6 +103,10 @@ const ctx = {
   // The stub only needs to accept the listener registration; the waterfall is
   // exercised by the unit tests.
   on: () => () => {},
+  // Same for the prompt registry: accept the contributions, do not assemble.
+  inject: (deps, callback) => {
+    callback({ systemPrompt: { context: () => () => {}, section: () => () => {} } })
+  },
 }
 
 const started = Date.now()

@@ -150,6 +150,9 @@ harness 启动时第一行先探 `127.0.0.1:8791`：已经有 FlyMemory 服务�
     shutdownOnDispose: true     # 退出时关掉本次拉起的引擎
     nativeHooks: true           # 每条手打提示做召回+捕获
     hookTimeoutMs: 6000         # 每次钩子请求的预算
+    workingContext: true        # 每请求发布一份有界的记忆摘要
+    workingContextChars: 1200   # 摘要上限（含包裹标签）
+    workingContextMinutes: 240  # 摘要往回看多久
     writeHooksConfig: true      # 同时给 DSH 之外的客户端写 hooks.json
     seedFromUpstream: false     # 默认不导入别的库
     upstreamLibrary: ''         # 想导入就同时配这两项
@@ -205,6 +208,39 @@ node bin/flymemory.mjs log -n 40
     port: 8791
     nativeHooks: false
 ```
+
+## 让上下文待在一个区间里
+
+不该等到窗口塞满才开始处理。三件事让每个请求都小、且该在的东西都在：
+
+**1. 工作上下文（内置）。** 每次请求，插件把一份有界的记忆摘要作为 prompt
+*context* 发出去——`<working-context source="flymemory">`，最多 1.2KB，最多每 45 秒
+从 `flymemory_session_pack` 刷新一次。它带近期轨迹和已有结论，所以即使逐字窗口被裁掉，
+模型仍从「当前状态」起步。它是 optional context：运行时抑制器可以去掉它；记忆服务挂了
+就沿用上一份摘要，不会报错。
+
+**2. 压缩结果回到记忆里。** 会话写入 `compaction/summary` 时，摘要文本会被存成
+`context` 分区下的 `checkpoint,compaction` 条目。被压缩的历史仍然可召回，而且权威在库里，
+不是只剩一份检查点。
+
+**3. 早触发压缩（可选）。** DSH 的 `compaction-basic` 行在 agent preset 里，改阈值只能
+整段重述 preset。[`examples/early-band.patch.yml`](examples/early-band.patch.yml) 就是
+干这个的，只改三个数：窗口到 **45%** 就压（原来 80%）、保留 **12%** 逐字（原来 16%）、
+headroom 调小以便小窗口也合法。把它贴进你的 profile patch 即可。它会**钉住一份 preset
+副本**——DSH 升级后请重新生成，别留旧的。
+
+它**不**做的事：不替换 DSH 的压缩后端，也替换不了——零依赖插件 import 不到
+`@deepseek-ai/dsh-compaction`。所以「压缩」这个动作仍是 DSH 自己的，只是被提前触发；
+FlyMemory 负责的是「每轮模型看到什么」以及「被压掉的东西留在哪」。
+
+借鉴的项目：
+
+- [MemGPT / Letta（arXiv 2310.08560）](https://arxiv.org/abs/2310.08560)：把上下文窗口
+  当内存、外部存储当磁盘，显式分页。
+- InfiAgent（[ACL Anthology](https://aclanthology.org/people/li-ming/)）：用「状态快照 +
+  固定近期窗口」重建上下文，让推理上下文始终有界，而不是溢出后才压。
+- [Chroma 的「context rot」测量](https://research.trychroma.com/context-rot)：长上下文会
+  劣化，宁要少量高信号 token，不要更大的窗口。
 
 ## 导入已有的库
 
