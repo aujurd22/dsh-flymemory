@@ -229,7 +229,9 @@ harness 启动时第一行先探 `127.0.0.1:8791`：已经有 FlyMemory 服务�
     hookTimeoutMs: 6000         # 每次钩子请求的预算
     workingContext: true        # 每请求发布一份有界的记忆摘要
     workingContextChars: 1200   # 摘要上限（含包裹标签）
-    workingContextMinutes: 240  # 摘要往回看多久
+    workingContextMinutes: 240  # 摘要往回看多久（仅 pack 模式）
+    workingContextSource: index # index=按本轮文本检索；pack=时间窗口（会跨会话）
+    workingContextTopK: 8       # index 模式下每次给几条指针
     useGate: true               # 记录「注入的指针有没有被展开/再召/取代」
     writeHooksConfig: true      # 同时给 DSH 之外的客户端写 hooks.json
     seedFromUpstream: false     # 默认不导入别的库
@@ -300,7 +302,10 @@ node bin/flymemory.mjs version      # 本机这版 vs npm 上最新
 
 **1. 工作上下文是「索引」，不是记忆倾倒。** 每次请求插件发
 `<working-context source="flymemory" type="index">`：最多 1.2KB 的指针
-（`#id | 年龄 | 来源 | 一行`），最多每 45 秒从 `flymemory_session_pack` 刷新，块头明确
+（`#id | 年龄 | 来源 | 一行`），**按本轮进入的文本检索出来的**（`flymemory_recall_index`），不是按时间窗口。
+这点比听起来重要：库里没有会话 id，所以任何「最近 N 分钟」的摘要都是全库的——它会显示
+任何客户端最后写的东西，那正是「别的会话的任务串进来」的原因。想看旧行为可以设
+`workingContextSource: pack`。块头明确
 写着「要读正文请先 `flymemory_get_memory(id)`」。正文由模型自己拉，插件**从不替它展开**。
 这个分工是被测出来的：上游 P-USEGATE（2026-10-26）里指针形态的证据覆盖 +10.5pp，只在
 「指针被跟着展开」时成立，而那次展开把池 token 推到 **12.15 倍**——所以展开始终是模型的

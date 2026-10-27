@@ -327,3 +327,39 @@ describe('credential filter covers registry tokens', () => {
     assert.equal(isSkippableText('ordinary sentence about npm packages'), false)
   })
 })
+
+describe('query-scoped working context', () => {
+  it('passes the step query and the minute window to the fetcher', async () => {
+    const seen = []
+    const band = createContextBand(options(), {
+      fetchDigest: async (args) => { seen.push(args); return PACK }
+    })
+    await band.refresh('a', null, 'why is the cart page stale')
+    assert.deepEqual(seen, [{ minutes: 240, query: 'why is the cart page stale' }])
+  })
+
+  it('never fetches the store-wide pack when scoped mode has no query', async () => {
+    let calls = 0
+    const band = createContextBand(options({ workingContextRequireQuery: true }), {
+      fetchDigest: async () => { calls += 1; return PACK },
+    })
+    assert.equal(await band.refresh('a', null, ''), false)
+    assert.equal(calls, 0, 'a clock-scoped digest is exactly the cross-conversation leak')
+  })
+
+  it('takes the query from the entering step through queryOf', async () => {
+    const handlers = {}
+    const ctx = { on: (name, fn) => { handlers[name] = fn; return () => {} }, inject: () => {} }
+    const fetched = []
+    const band = createContextBand(options(), {
+      fetchDigest: async (args) => { fetched.push(args.query); return PACK },
+    })
+    registerContextBand(ctx, options(), band, { info() {}, warn() {} }, {
+      queryOf: (decision) => decision?.latestUserText || '',
+      storeCheckpoint: async () => {},
+    })
+    const decision = { kind: 'enter', messages: [], latestUserText: 'fix the checkout badge' }
+    await handlers['agent/pre-step']({ agent: { id: 'a' } }, async () => decision)
+    assert.deepEqual(fetched, ['fix the checkout badge'])
+  })
+})

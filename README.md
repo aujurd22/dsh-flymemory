@@ -267,7 +267,9 @@ patch entry replaces the whole `config`, so write out everything you need:
     hookTimeoutMs: 6000         # budget per hook request
     workingContext: true        # publish a bounded memory digest per request
     workingContextChars: 1200   # cap for that digest, wrapper included
-    workingContextMinutes: 240  # how far back the digest looks
+    workingContextMinutes: 240  # how far back the digest looks (pack mode only)
+    workingContextSource: index # index = retrieve against this step's text; pack = clock window
+    workingContextTopK: 8       # pointers per digest in index mode
     useGate: true               # account injected pointers -> expansions/re-calls
     writeHooksConfig: true      # also write hooks.json for clients outside DSH
     seedFromUpstream: false     # don't import another library implicitly
@@ -348,10 +350,17 @@ pieces keep each request small and keep what matters available.
 
 **1. The working context is an index, not a memory dump.** On every request the
 plugin publishes `<working-context source="flymemory" type="index">`: at most
-1.2 KB of pointers (`#id | age | app | one line`), refreshed at most every 45
-seconds from `flymemory_session_pack`, with the header saying to call
-`flymemory_get_memory(id)` before acting on one. The model pulls the full text;
-the plugin never expands a pointer itself. That split is deliberate — upstream
+1.2 KB of pointers (`#id | age | app | one line`), with the header saying to call
+`flymemory_get_memory(id)` before acting on one.
+
+The pointers are **retrieved against the text entering this step**
+(`flymemory_recall_index`), not against a clock. That matters more than it
+sounds: the store has no session id, so any time-windowed digest is store-wide —
+it shows whatever any host wrote last, and that is exactly how another
+conversation's task leaks into this one. `workingContextSource: pack` restores
+the old clock-windowed behaviour if you want it.
+
+The model pulls the full text; the plugin never expands a pointer itself. That split is deliberate — upstream
 measured the pointer form at +10.5pp evidence coverage **only when the pointer
 was followed by an expansion**, and that expansion cost 12.15× pool tokens
 (P-USEGATE, 2026-10-26), so expansion stays a model decision. The context is
