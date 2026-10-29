@@ -44,6 +44,8 @@ jobs:
           python-version: '3.11'
       - name: Byte-compile the vendored engine
         run: python -m compileall -q python
+      - name: Hook prompt filters (store-wide RECENT block, write receipts)
+        run: python tests/hook_filter_test.py
       - name: Endpoint resolution honours --url and the environment
         run: |
           python - <<'PY'

@@ -1,10 +1,10 @@
 """UserPromptSubmit hook (DSH plugin copy): forward each user message to the
 flymemory resident service.
 
-Copied from upstream `flymemory/hook_auto.py`; the only change is that the
-endpoint is no longer hard-coded — `--url` first, then FLYMEMORY_MCP_URL, then
-the built-in default. Everything else (the `--client` app tag and the
-ZCode/Qoder output shapes) is upstream verbatim.
+Copied from upstream `flymemory/hook_auto.py`. Local changes: the endpoint is
+configurable (`--url`, then FLYMEMORY_MCP_URL, then the default); extra credential
+markers; and `hook_filters.strip_recent` removes the store-wide RECENT block. The
+`--client` app tag and the ZCode/Qoder output shapes are upstream verbatim.
 
 ZCode expects {"additionalContext": ...}; Qoder expects
 {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", ...}}. The host
@@ -16,6 +16,8 @@ additionalContext. Any error exits 0 silently — the service being down must
 never block a session.
 """
 import sys, os, json, argparse, urllib.request
+
+from hook_filters import strip_recent
 
 DEFAULT_URL = "http://127.0.0.1:8791/mcp"
 
@@ -115,9 +117,12 @@ def main():
                                         if isinstance(c, dict))
         except Exception:
             lesson_text = ""
+        # dsh-flymemory 适配：剥掉上游的 RECENT 时间窗与写入回执（见 hook_filters）
+        text = strip_recent(text)
+
         # 乱回忆门: top-1 相似度过低说明当前消息与库内记忆无实质关联——
         # 硬塞 5 条弱相关条目只会制造时序混乱和噪音。低置信时只保留
-        # RECENT 与 lessons 通道，正常召回照旧。
+        # lessons 通道，正常召回照旧。
         import re as _re
         low_conf = False
         try:
