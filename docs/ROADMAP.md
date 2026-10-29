@@ -57,9 +57,12 @@ decay, length-tiered dedup, entity-state chains, evidence-linked consolidation,
 
 ### Tier 1 — engineering, this week, no format change
 
-1. **Debounce the save.** Batch writes and flush on idle/exit; drop the per-write
-   440 ms. Expected: write path goes from ~0.5 s to tens of ms, and a single
-   write stops blocking other clients.
+1. **Debounce the save.** *(done 2026-10-29)* Batch writes and flush on
+   idle/exit. Measured on a copy of the live 19,494-entry library, 20 writes
+   each: **517 ms average / 453 ms median before, 60 ms median after**
+   (`FLYMEMORY_SAVE_DEBOUNCE=0` restores write-through). The first write after a
+   quiet period still persists immediately, and a background flusher plus an
+   atexit hook mean nothing is dropped.
 2. **Make embedder mismatch loud.** `stats` reports it and `doctor` fails; a
    background re-embed is the follow-up. Today a model swap silently degrades
    recall.

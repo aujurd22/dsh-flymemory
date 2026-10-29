@@ -233,6 +233,7 @@ harness 启动时第一行先探 `127.0.0.1:8791`：已经有 FlyMemory 服务�
     workingContextSource: index # index=按本轮文本检索；pack=时间窗口（会跨会话）
     workingContextTopK: 8       # index 模式下每次给几条指针
     useGate: true               # 记录「注入的指针有没有被展开/再召/取代」
+    # 引擎侧：FLYMEMORY_SAVE_DEBOUNCE=5（秒）合并落盘；0 = 每次写都落盘
     writeHooksConfig: true      # 同时给 DSH 之外的客户端写 hooks.json
     seedFromUpstream: false     # 默认不导入别的库
     upstreamLibrary: ''         # 想导入就同时配这两项

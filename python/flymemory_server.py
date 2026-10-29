@@ -27,6 +27,8 @@ Tools:
                                           端口已被占用时直接退出（幂等，适合开机自启）。
 """
 import sys, os, json, pickle, time, socket, argparse, threading, re
+
+from save_debouncer import DebouncedSaver
 import numpy as np
 
 
@@ -99,7 +101,7 @@ except ImportError:  # 无 PYTHONPATH、以脚本方式直接运行时
 # HTTP_HOST / HTTP_PORT / DB_PATH / DATA_DIR 均在文件顶部按 参数→环境变量→默认值 解析完成。
 
 # streamable-http 模式下多个请求并发进入工具线程，记忆与模型加载必须串行化
-_mem_lock = threading.Lock()
+_mem_lock = threading.RLock()  # RLock: the debounced saver flushes from a helper thread
 
 _mem = None
 
@@ -114,7 +116,30 @@ def get_memory():
 
 def save_memory():
     if _mem is None: return
-    save(_mem, DB_PATH)
+    _saver.mark()
+
+# dsh-flymemory adaptation: a whole-library dump on every write measured 440 ms
+# at 19,494 entries (2026-10-29) and grows linearly, while the server is
+# single-threaded. Writes are debounced instead: the first one still persists
+# immediately, a burst inside the window collapses into one flush, and nothing is
+# dropped (background flusher + atexit in save_debouncer).
+# FLYMEMORY_SAVE_DEBOUNCE=0 restores write-through behaviour.
+def _flush_now():
+    if _mem is None: return
+    with _mem_lock:
+        save(_mem, DB_PATH)
+
+def _build_saver():
+    raw = os.environ.get("FLYMEMORY_SAVE_DEBOUNCE")
+    try:
+        interval = 5.0 if raw is None or raw == "" else float(raw)
+    except ValueError:
+        interval = 5.0
+    saver = DebouncedSaver(_flush_now, interval=interval)
+    saver.start_background()
+    return saver
+
+_saver = _build_saver()
 
 # ----- multi-app provenance -----
 # One shared store is used by several host apps (ZCode, Qoder, ...). Every

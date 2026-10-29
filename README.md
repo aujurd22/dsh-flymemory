@@ -271,6 +271,7 @@ patch entry replaces the whole `config`, so write out everything you need:
     workingContextSource: index # index = retrieve against this step's text; pack = clock window
     workingContextTopK: 8       # pointers per digest in index mode
     useGate: true               # account injected pointers -> expansions/re-calls
+    # engine-side: FLYMEMORY_SAVE_DEBOUNCE=5 (seconds) batches disk writes; 0 = write-through
     writeHooksConfig: true      # also write hooks.json for clients outside DSH
     seedFromUpstream: false     # don't import another library implicitly
     upstreamLibrary: ''         # set both to import one, once
