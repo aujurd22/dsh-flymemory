@@ -29,6 +29,36 @@ Two results from 2026 shape the plan more than any feature list:
   projects like [waxseal](https://pypi.org/project/waxseal/) / ontogr-mem are
   shipping tamper-evident, hash-chained memory ledgers.
 
+## Measured, 2026-10-30: three arms, one reader
+
+`scripts/bench_three_arms.py`, LongMemEval oracle, 120 questions, reader and
+judge both `deepseek/deepseek-v4.1-flash` with `reasoning_effort=off`,
+temperature 0, a fresh store per question:
+
+| arm | strict | weighted | prompt tokens / answer |
+|---|---|---|---|
+| no memory | 3.3% | 5.0% | ~100 |
+| RAG top-5, full text | 39.2% | 44.6% | ~210 |
+| FlyMemory, pointers only (one-shot) | 31.7% | 37.1% | — |
+| **FlyMemory, agentic (search + read)** | **52.5%** | **56.7%** | **~1,690** |
+
+Three things follow, and two of them are uncomfortable:
+
+1. **The protocol is the advantage, not the store alone.** Agentic retrieval beats
+   top-5 RAG by **+13.3pp strict** at the same reader. That is the pre-registered
+   bar (+5pp) cleared with room.
+2. **Pointers alone lose to RAG** (31.7% vs 39.2%). Pointing is only worth it when
+   the model can expand a pointer; injecting an index without the tool path is
+   actively worse than dumping five full entries. This is the same shape P-USEGATE
+   measured from the other direction.
+3. **It costs ~8x the prompt tokens** (+13.3pp for 8x, versus P-USEGATE's +10.5pp
+   for 12x). Worth it, and reducible: the run averaged 1.9 reads per question.
+
+Caveats to fix before calling it a benchmark result: per-question rows are not
+stored yet, so there is no paired significance test (the unpaired estimate is
+~2 sigma), and the numbers are not broken down by question type — the prediction
+that *knowledge-update* is where this design is strongest is still untested.
+
 ## Where we actually stand
 
 Measured on the live store:
