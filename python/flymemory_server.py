@@ -610,12 +610,21 @@ def flymemory_auto(context: str, response: str = "", app: str = "",
             output_parts.append("RECALL: memory empty (first use).")
 
         # ===== RECENT channel: compression protection for the working thread =====
-        # Pure recency, independent of similarity — deictic references ("that
-        # thing from just now") survive compaction through this block.
-        recent = [m for m in mem.recent(minutes=90, limit=6)
-                  if m.memory_id not in recalled_ids]
+        # Upstream keeps a pure-recency block so deictic references ("that thing
+        # from just now") survive compaction. dsh-flymemory adaptation: that block
+        # is a clock window over the WHOLE library -- entries carry no session id --
+        # so with several conversations sharing one store it injects another
+        # conversation's work. Off by default here; set FLYMEMORY_RECENT_MINUTES=90
+        # to restore the upstream behaviour.
+        try:
+            recent_minutes = float(os.environ.get("FLYMEMORY_RECENT_MINUTES") or 0)
+        except ValueError:
+            recent_minutes = 0.0
+        recent = ([m for m in mem.recent(minutes=recent_minutes, limit=6)
+                   if m.memory_id not in recalled_ids]
+                  if recent_minutes > 0 else [])
         if recent:
-            output_parts.append("RECENT CONTEXT (last ~90 min):")
+            output_parts.append(f"RECENT CONTEXT (last ~{recent_minutes:g} min):")
             output_parts.extend(f"  [#{m.memory_id} | app={_app_of(m)} | "
                                 f"{_age_str(m.timestamp)}] {m.text[:70]}" for m in recent)
 

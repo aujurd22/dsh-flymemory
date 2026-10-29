@@ -174,6 +174,9 @@ try {
     top_k: 3,
   })
   check(recalled.includes('smoke probe'), 'flymemory_recall returned the probe')
+  // The clock-windowed RECENT block is off by default: the library carries no
+  // session id, so it would inject another conversation's work.
+  check(!recalled.includes('RECENT CONTEXT'), 'recall output carries no store-wide RECENT block')
   if (created.length > 0) {
     const full = await callTool('flymemory_get_memory', { memory_id: created[created.length - 1] })
     check(full.includes('smoke probe'), 'flymemory_get_memory returned the full text')

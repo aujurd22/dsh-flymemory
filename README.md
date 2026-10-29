@@ -315,6 +315,12 @@ After installing the bundle, the same CLI is linked into the profile at
 ## About the hooks
 
 They're on by default, because automatic memory is the whole point of the thing.
+
+One thing they do **not** inject: upstream's `RECENT CONTEXT (last ~90 min)` block. It is
+a clock window over the whole library, and entries carry no session id — with several
+conversations sharing one store, it pulls another conversation's work into this one.
+Recall is scoped by the text you just typed instead. If you want the old behaviour,
+start the engine with `FLYMEMORY_RECENT_MINUTES=90`.
 They run inside this plugin on `agent/pre-step` — no hook bridge package needed.
 Worth knowing exactly what that means:
 
