@@ -19,3 +19,6 @@ server.pid
 Thumbs.db
 .idea/
 .vscode/
+
+# benchmark outputs (local runs)
+reports/
