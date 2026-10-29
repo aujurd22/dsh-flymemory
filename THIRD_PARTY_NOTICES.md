@@ -8,7 +8,20 @@ the FlyMemory engine so the plugin works without a separate checkout.
 - Upstream project: <https://github.com/aujurd22/flymemory>
 - License: MIT — Copyright (c) 2026 Junrong Du
 - Vendored under [`python/`](python/)
-- Synced with upstream `246d9bd` plus the uncommitted working tree of 2026-10-24
+- Synced with upstream `7328000` (2026-10-29). Since the previous sync point the
+  engine changed in one place: `v3.py` now canonicalises `state_key`
+  (`strip() + casefold()`) at the public entry point before dedup and the I1
+  active-unique rule. The fix was first written here, then ported upstream
+  (`1c1c056`), so the file is byte-identical again. Verified on the public path:
+  three writes as `user.phone` / `User.Phone` / `user.phone ` leave one active
+  state, `state_lookup` returns the newest value, and `state_history` keeps the
+  three-entry chain.
+- `mcp_v3.py`, `hook_auto.py`, `hook_compact.py`, `clusters.py` and
+  `maintenance.py` did not change since the previous sync point; the three
+  adapted files keep their documented differences.
+- Upstream also adopted two things this project raised: `flymemory/facts.db` is
+  now gitignored (`86fab3e`), and the P-USEGATE verdict was recorded with the
+  same reading we acted on (`581e3f7`).
   (multi-app provenance). Included since the first import: the keyed-state write
   fix, the dated age stamps, the FORM/LESSON/aggregation guidance, the lesson
   channel with its low-confidence gate, the automation-message filter, the
