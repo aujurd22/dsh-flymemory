@@ -60,6 +60,37 @@ n=40:
 - the oracle-split advantage of full context **disappears** when the history is
   long: 76.7% → 52.5%.
 
+## mem0, on the same ruler (120 questions)
+
+`mem0ai` 2.2.1, local Qdrant, `infer=False` (pure store, no LLM extraction), the
+same embedder as ours (`paraphrase-multilingual-MiniLM-L12-v2`), the same reader
+and judge, and per-question isolation through `user_id`:
+
+| arm | strict | paired vs mem0 |
+|---|---|---|
+| mem0 (top-5) | **58.3%** | — |
+| FlyMemory, agentic 3 rounds | 56.7% | 19 gained / 21 lost, **p=0.875** |
+| RAG top-50 (ours) | 56.7% | 18 / 20, p=0.871 |
+| RAG top-20 (ours) | 49.2% | 18 / 29, p=0.144 |
+| pointer index only | 35.0% | 10 / 38, **p<0.001** |
+| full context | 76.7% | 26 / 4, **p<0.001** |
+
+By type, mem0 vs agentic3: single-session-assistant 16/16 vs 10/16 (mem0 clearly
+better), single-session-user 16/16 vs 13/16, multi-session 19/43 vs 21/43,
+temporal-reasoning 11/24 vs 14/24 (ours better), knowledge-update 8/15 each.
+
+Reading: **parity overall**, with different strengths -- mem0 is better at
+single-session recall (it hands the reader whole messages), this store is better
+at temporal questions. Neither reaches full context on a short haystack. Note the
+costs: mem0 ~1.2k prompt tokens/answer, agentic3 ~3.0k -- parity can be had for
+less, which is what the `budget` arm is measuring.
+
+Caveat that matters: `infer=False` is mem0's *raw store* mode. With its default
+`infer=True` it runs an LLM per message to extract facts, which is the mode its
+published numbers use -- and which would cost hundreds of thousands of LLM calls
+across 500 questions. So this compares the two systems' **retrieval**, not mem0's
+full extraction pipeline.
+
 ## What this supports, and what it does not
 
 Supported:
