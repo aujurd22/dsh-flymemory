@@ -84,6 +84,34 @@ weak: temporal reasoning (+11/47) and multi-session questions (+5/55).
    easier -- the win there would have to come from answer-side presentation, not
    from retrieval.
 
+### The rounds curve, and a second falsified prediction (120 questions)
+
+Adding the rounds dimension as separate arms (`agentic1/2/3`) and a lightweight
+profile arm (`profile`: several preference-oriented queries, deduped into a
+profile block) gives one more table:
+
+| arm | strict | weighted | reads/answer | prompt tokens/answer |
+|---|---|---|---|---|
+| no memory | 2.5% | 4.6% | 0 | ~99 |
+| RAG top-5 | 37.5% | 42.5% | 0 | ~213 |
+| pointers only | 35.0% | 39.6% | 0 | ~390 |
+| profile block | 37.5% | 40.8% | 0 | ~539 |
+| agentic, 1 round | 10.0% | 10.0% | 0.0 | ~1,036 |
+| agentic, 2 rounds | 50.8% | 55.0% | 1.7 | ~2,249 |
+| **agentic, 3 rounds** | **56.7%** | **61.3%** | 2.0 | ~2,987 |
+
+- **One round is worse than no tools at all** (10.0%): the model spends its single
+  round searching and then answers from pointer lines. A tool protocol needs room
+  to read, and 2 rounds is where it starts to pay (50.8%, p<0.001 vs 1 round).
+- **3 rounds vs 2** is +5.9pp for +33% tokens, McNemar 9 gained / 2 lost,
+  **p=0.065** -- suggestive, not established. The 500-question run exists to
+  decide this.
+- **The lightweight profile does not help.** 37.5% strict, exactly RAG, p=1.000
+  against it. Preference questions stay at 0-2/6 for every arm: a profile made by
+  concatenating retrieved lines is not a profile. Building one properly means
+  model-side synthesis over many turns, which this design deliberately avoids --
+  so this stays a known gap, not a roadmap item.
+
 ### What it costs, and the gaps it leaves
 
 Agentic costs ~15x the prompt tokens of RAG for 13 points, at 1.8 reads per
