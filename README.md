@@ -8,7 +8,7 @@ English | [中文](README.zh.md)
 Long-term memory for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
 
 This is a plugin (a DSH *bundle*) that runs [FlyMemory](https://github.com/aujurd22/flymemory)
-as a local MCP service and plugs it into the harness. You end up with 15 memory
+as a local MCP service and plugs it into the harness. You end up with 16 memory
 tools, plus a pair of hooks that quietly record what you've been working on and
 pull the relevant bits back when they matter — so you stop re-explaining the same
 context every session.
@@ -317,6 +317,14 @@ After installing the bundle, the same CLI is linked into the profile at
 ## About the hooks
 
 They're on by default, because automatic memory is the whole point of the thing.
+
+**Injection is a character budget, not an entry count.** A k-sweep on the same
+data (top-5 40.0%, top-10 44.2%, top-20 49.2%, top-50 56.7%) showed the score is
+monotone in how much history reaches the reader, so the hook now asks the service
+for `flymemory_recall_block`: the best entries' **full text**, packed until a
+character budget (`FLYMEMORY_INJECT_CHARS`, default 6000) is spent. Servers older
+than 1.6.0 do not expose that tool and the hook falls back to one-line recall, so
+mixing this plugin with an older FlyMemory build still works.
 
 **A measured comparison, and what it changed.** LongMemEval oracle, 200 questions,
 one reader (2026-10-30): no memory 3.5%, top-5 full text 41.0%, pointer lines only

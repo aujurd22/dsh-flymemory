@@ -177,6 +177,14 @@ try {
   // The clock-windowed RECENT block is off by default: the library carries no
   // session id, so it would inject another conversation's work.
   check(!recalled.includes('RECENT CONTEXT'), 'recall output carries no store-wide RECENT block')
+  // Budget-aware recall (the hook's injection shape): it must report the best
+  // similarity and stay inside the character budget it was given.
+  const block = await callTool('flymemory_recall_block', {
+    query: 'dsh-flymemory engine smoke probe',
+    budget_chars: 2000,
+  })
+  check(block.startsWith('top_sim='), 'flymemory_recall_block reports the best similarity', block.split('\n')[0])
+  check(block.includes('[memory block:'), 'flymemory_recall_block returns a packed block', (block.split('\n')[1] ?? '').slice(0, 60))
   if (created.length > 0) {
     const full = await callTool('flymemory_get_memory', { memory_id: created[created.length - 1] })
     check(full.includes('smoke probe'), 'flymemory_get_memory returned the full text')

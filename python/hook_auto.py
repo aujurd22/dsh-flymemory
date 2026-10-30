@@ -45,6 +45,27 @@ def _rpc(url, tool, arguments, timeout=8):
     return "\n".join(parts).strip()
 
 
+def _budget_block(url, prompt, budget_chars):
+    """Ask the service for a budgeted block of full-text entries.
+
+    Falls back to "" (caller keeps the one-line recall) when the endpoint is an
+    older server that does not expose ``flymemory_recall_block`` -- the plugin
+    happily points at any FlyMemory build.
+    """
+    try:
+        budget = int(budget_chars)
+    except (TypeError, ValueError):
+        return ""
+    if budget <= 0:
+        return ""
+    try:
+        block = _rpc(url, "flymemory_recall_block",
+                     {"query": (prompt or "")[:1200], "budget_chars": budget})
+    except Exception:
+        return ""
+    return block if block.startswith("top_sim=") else ""
+
+
 def _expand_top_hits(text, url):
     """Inline the full text of the closest high-similarity hits.
 
@@ -175,6 +196,11 @@ def main():
             lesson_text = ""
         # dsh-flymemory 适配：剥掉上游的 RECENT 时间窗与写入回执（见 hook_filters）
         text = strip_recent(text)
+        # 注入量按字符预算而不是固定条数（实测：top-5 40.0% / top-20 49.2% /
+        # top-50 56.7%，见 docs/COMPARISON.md）。旧服务没有该工具时自动退回一行摘要。
+        budget_block = _budget_block(URL, prompt, os.environ.get("FLYMEMORY_INJECT_CHARS", "6000"))
+        if budget_block:
+            text = budget_block
         # 实测（2026-10-30，LongMemEval n=200）：只给指针 36.0%，塞 5 条全文 41.0%，
         # 内联 top-2 全文 37.0%（p=0.815，与纯指针无差别）——这条改动实测无效，
         # 所以默认关闭；agentic（模型自己去读）才是真正的赢法（54.0%，p<0.001）。
@@ -192,7 +218,9 @@ def main():
         import re as _re
         low_conf = False
         try:
-            sims = [float(x) for x in _re.findall(r"sim=(0\.\d+)", text)]
+            top = _re.search(r"top_sim=([0-9.]+)", text)
+            sims = [float(top.group(1))] if top else [
+                float(x) for x in _re.findall(r"sim=(0\.\d+)", text)]
             low_conf = bool(sims) and max(sims) < 0.40
         except Exception:
             low_conf = False

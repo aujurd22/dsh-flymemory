@@ -8,7 +8,7 @@
 给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 加长期记忆。
 
 这是一个 DSH 插件（bundle）：把 [FlyMemory](https://github.com/aujurd22/flymemory)
-当作本地 MCP 服务跑起来，接进 harness。装完之后模型手里多出 15 个记忆工具，另外还有
+当作本地 MCP 服务跑起来，接进 harness。装完之后模型手里多出 16 个记忆工具，另外还有
 两个钩子在背后干活——你干活的过程它自己记，下次用得上就自己翻出来。省掉每次开会话都
 重新交代一遍背景的功夫。
 
@@ -16,7 +16,7 @@
 文件，没有任何数据发到外面。
 
 ```
-DSH 会话 ──┬── mcp__flymemory__*   模型可调的 15 个工具
+DSH 会话 ──┬── mcp__flymemory__*   模型可调的 16 个工具
            └── 钩子                  回合前召回，回合后记录
                      │
                      ▼
@@ -83,7 +83,7 @@ DSH 会话 ──┬── mcp__flymemory__*   模型可调的 15 个工具
 
 ## 拿到什么
 
-15 个工具，调用时都带 `mcp__flymemory__` 前缀：
+16 个工具，调用时都带 `mcp__flymemory__` 前缀：
 
 | 工具 | 干什么用的 |
 |---|---|
@@ -276,6 +276,12 @@ node bin/flymemory.mjs version      # 本机这版 vs npm 上最新
 
 默认是开着的，毕竟「自动记忆」就是这个插件的意义。钩子跑在插件自己身上（`agent/pre-step`），
 不依赖宿主的 hook bridge。它具体做了什么，值得说清楚：
+
+**注入按字符预算，不按条数。** 同一批数据上的 k 扫描（top-5 40.0%、top-10 44.2%、
+top-20 49.2%、top-50 56.7%）显示：分数随「有多少历史到达 reader」单调上升。所以钩子改成
+向服务端要 `flymemory_recall_block`：按相似度取最好的若干条**全文**，填到一个字符预算
+（`FLYMEMORY_INJECT_CHARS`，默认 6000）为止。1.6.0 之前的服务端没有这个工具，钩子会自动
+退回一行摘要——所以插件的任何版本都能配任何 FlyMemory 版本。
 
 **一次实测，以及它改变了什么。** LongMemEval oracle、200 题、同一 reader（2026-10-30）：
 无记忆 3.5%，top-5 全文 41.0%，只给指针 36.0%，指针 + 内联最接近的两条全文 37.0%，

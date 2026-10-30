@@ -48,6 +48,8 @@ jobs:
         run: python tests/hook_filter_test.py
       - name: Debounced persistence (first write immediate, bursts batched)
         run: python tests/save_debounce_test.py
+      - name: Budgeted recall packing
+        run: python tests/recall_block_test.py
       - name: Endpoint resolution honours --url and the environment
         run: |
           python - <<'PY'

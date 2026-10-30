@@ -168,6 +168,76 @@ def run_rag(question, record, model, memory, topk=5):
     return ask_with_context(model, question, record, context), 0
 
 
+_MEM0 = {"instance": None, "dir": None}
+
+
+def mem0_instance():
+    """One local mem0 store for the whole run, isolated per question by user_id.
+
+    `infer=False` keeps it a pure store (no LLM extraction) so the comparison is
+    about retrieval, and the cost stays sane: mem0's default path calls an LLM per
+    message, which for 500 questions would be hundreds of thousands of calls.
+    """
+    if _MEM0["instance"] is not None:
+        return _MEM0["instance"]
+    import tempfile as _tempfile
+    # mem0 builds its LLM client even for infer=False; it is never called,
+    # so a placeholder key is enough and no request leaves the machine.
+    os.environ.setdefault("OPENAI_API_KEY", "sk-placeholder-never-called")
+    from mem0 import Memory
+    workdir = _tempfile.mkdtemp(prefix="mem0-lme-")
+    _MEM0["dir"] = workdir
+    config = {
+        "vector_store": {"provider": "qdrant",
+                         "config": {"path": workdir, "collection_name": "lme",
+                                    "on_disk": True, "embedding_model_dims": 384}},
+        "embedder": {"provider": "huggingface",
+                     "config": {"model": os.environ.get(
+                         "MEM0_EMBEDDER",
+                         "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")}},
+    }
+    _MEM0["instance"] = Memory.from_config(config)
+    return _MEM0["instance"]
+
+
+def run_mem0(question, record, model, memory, limit=5):
+    """The real thing, same reader and judge: mem0's own store and search."""
+    client = mem0_instance()
+    user_id = str(record.get("question_id"))
+    turns = []
+    for date_text, session in zip(record.get("haystack_dates", []),
+                                  record.get("haystack_sessions", [])):
+        for turn in session:
+            content = (turn.get("content") or "").strip()
+            if content:
+                turns.append({"role": turn.get("role") or "user",
+                              "content": f"[{date_text}] {content}"})
+    try:
+        client.add(turns, user_id=user_id, infer=False)
+        hits = client.search(question, filters={"user_id": user_id}, top_k=limit)
+    except Exception as error:                      # noqa: BLE001
+        return f"[mem0 error: {error}]", 0
+    results = hits.get("results", hits) if isinstance(hits, dict) else hits
+    texts = [hit.get("memory") or hit.get("text") or "" for hit in results]
+    context = "\n\n".join(t for t in texts if t) or "(nothing retrieved)"
+    return ask_with_context(model, question, record, context), 0
+
+
+def run_budget(question, record, model, memory, budget_chars=6000,
+               per_entry_chars=600, topk=25):
+    """The injection shape the hook now uses: fill a character budget, best first."""
+    from recall_block import pack
+    hits = memory.recall(question, top_k=topk)
+    entries = []
+    for entry, sim, _score in hits:
+        stamp = time.strftime("%Y-%m-%d", time.localtime(entry.timestamp))
+        entries.append((f"[#{entry.memory_id} | {sim:.2f} | {stamp}]", entry.text))
+    block, _stats = pack(entries, budget_chars=budget_chars,
+                         per_entry_chars=per_entry_chars)
+    return ask_with_context(model, question, record,
+                            "Memory context (budget-aware):\n" + block), 0
+
+
 def run_fly_oneshot(question, record, model, memory, topk=8):
     hits = retrieve(memory, question, topk)
     context = ("Memory index (pointers only -- you cannot expand them in this run):\n"
@@ -360,7 +430,7 @@ def main():
     for index, record in enumerate(records, 1):
         question, truth = record["question"], record["answer"]
         qtype = record.get("question_type", "?")
-        needs_store = any(arm not in ("nomem", "fullctx") for arm in cells)
+        needs_store = any(arm not in ("nomem", "fullctx", "mem0") for arm in cells)
         memory = build_store(record) if needs_store else None
         print(f"[{index}/{len(records)}] {qtype}: {question[:70]}", flush=True)
         for arm in cells:
@@ -374,6 +444,10 @@ def main():
                 answer, rounds = run_rag(question, record, clients[arm], memory, topk=topk)
             elif arm == "hybrid":
                 answer, rounds = run_fly_hybrid(question, record, clients[arm], memory)
+            elif arm == "mem0":
+                answer, rounds = run_mem0(question, record, clients[arm], memory)
+            elif arm == "budget":
+                answer, rounds = run_budget(question, record, clients[arm], memory)
             elif arm == "fullctx":
                 answer, rounds = run_fullctx(question, record, clients[arm], memory,
                                                  max_chars=args.fullctx_chars)
