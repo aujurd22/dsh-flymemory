@@ -47,68 +47,23 @@ n=150:
 
 | arm | strict | weighted | prompt tokens / answer |
 |---|---|---|---|
-| no memory | 2.5% | 5.0% | ~100 |
-| RAG top-20 | 52.5% | 53.8% | ~578 |
-| RAG top-50 | 47.5% | 47.5% | ~1,357 |
-| **agentic 3 rounds** | **55.0%** | 58.8% | ~3,004 |
-| full context | 52.5% | 52.5% | **~111,137** |
+| no memory | 2.0% | 4.3% | ~99 |
+| RAG top-20 | 42.0% | 47.7% | ~616 |
+| **agentic 3 rounds** | **52.0%** | **56.0%** | ~3,040 |
+| full context | 45.3% | 47.3% | **~111,283** |
 
-- full context vs agentic3: 7 gained / 6 lost, **p=1.000** — a tie.
-- but full context costs **192×** the tokens of RAG-top-20 and **37×** agentic3
-  for the same score, and it only works at all because this reader has a 1M
-  window.
-- the oracle-split advantage of full context **disappears** when the history is
-  long: 76.7% → 52.5%.
-
-## Injection shape (120 questions)
-
-The hook used to inject five one-line summaries. Since the k-sweep showed the
-score tracks how much history reaches the reader, 1.6.0 fills a character budget
-instead (`flymemory_recall_block`, 6000 chars by default):
-
-| injection | strict | prompt tokens / answer |
-|---|---|---|
-| 5 one-line summaries (the old default) | 40.0% | ~210 |
-| 20 full entries | 48.3% | ~545 |
-| **budgeted block (6000 chars)** | **50.8%** | ~1,095 |
-| 50 full entries | 56.7% | ~1,130 |
-
-So the change is worth it against what it replaced: **+10.8pp for ~+900 tokens**.
-But at the same token cost, simply taking more full entries (top-50, 56.7%) still
-edges out the 6000-char packing (50.8%) -- the packing is a bound, not a better
-selector. The plateau is around 50-57% for every one-shot injection, which is why
-the next real lever is the tool protocol (+14.2pp at n=500), not more text.
-
-## mem0, on the same ruler (120 questions)
-
-`mem0ai` 2.2.1, local Qdrant, `infer=False` (pure store, no LLM extraction), the
-same embedder as ours (`paraphrase-multilingual-MiniLM-L12-v2`), the same reader
-and judge, and per-question isolation through `user_id`:
-
-| arm | strict | paired vs mem0 |
-|---|---|---|
-| mem0 (top-5) | **58.3%** | — |
-| FlyMemory, agentic 3 rounds | 56.7% | 19 gained / 21 lost, **p=0.875** |
-| RAG top-50 (ours) | 56.7% | 18 / 20, p=0.871 |
-| RAG top-20 (ours) | 49.2% | 18 / 29, p=0.144 |
-| pointer index only | 35.0% | 10 / 38, **p<0.001** |
-| full context | 76.7% | 26 / 4, **p<0.001** |
-
-By type, mem0 vs agentic3: single-session-assistant 16/16 vs 10/16 (mem0 clearly
-better), single-session-user 16/16 vs 13/16, multi-session 19/43 vs 21/43,
-temporal-reasoning 11/24 vs 14/24 (ours better), knowledge-update 8/15 each.
-
-Reading: **parity overall**, with different strengths -- mem0 is better at
-single-session recall (it hands the reader whole messages), this store is better
-at temporal questions. Neither reaches full context on a short haystack. Note the
-costs: mem0 ~1.2k prompt tokens/answer, agentic3 ~3.0k -- parity can be had for
-less, which is what the `budget` arm is measuring.
-
-Caveat that matters: `infer=False` is mem0's *raw store* mode. With its default
-`infer=True` it runs an LLM per message to extract facts, which is the mode its
-published numbers use -- and which would cost hundreds of thousands of LLM calls
-across 500 questions. So this compares the two systems' **retrieval**, not mem0's
-full extraction pipeline.
+- full context does not tie here, it **loses**: 45.3% against 52.0% (McNemar 33
+  gained / 23 lost for us, p=0.229 -- direction ours, interval not tight enough to
+  claim superiority).
+- the cost gap is the decisive part: **180x** RAG-top-20's tokens and **37x**
+  agentic3's, and full context only runs at all because this reader has a 1M
+  window. A 128k-window agent cannot do it.
+- **context rot shows up by type**: temporal-reasoning 12/37 for full context
+  against 22/37 for the tool protocol (32% vs 59%), multi-session 10/43 against
+  18/43. Full context still wins single-session-assistant (16/22 vs 10/22) and
+  knowledge-update (18/24 vs 15/24).
+- the oracle-split advantage of full context **reverses** when history is long:
+  76.7% -> 45.3%, while the tool protocol only moves 56.7% -> 52.0%.
 
 ## What this supports, and what it does not
 
@@ -130,17 +85,18 @@ Not supported, and worth stating plainly:
 - "better than Mem0 / Zep / Letta". We have not run them; our arms are baselines
   we built, not their systems. A honest claim needs their code on this harness,
   which is the next experiment rather than a footnote.
-- "state-of-the-art on LongMemEval". n=40 on the long split, one reader, one
-  judge; the Ci is wide and the split is a subset.
+- "state-of-the-art on LongMemEval". n=150 on the long split, one reader, one
+  judge; the long-split lead over full context is directional, p=0.229.
 - any claim about preference questions: every arm scores 3–17% there. Synthesised
   user profiles are a gap, not a strength.
 
 ## Next experiments, in order
 
-1. **Long split at n=150** — the n=40 tie needs a tighter interval before it
-   becomes a positioning claim.
+1. **Long split at n=500** — n=150 is directional; the claim needs a tighter
+   interval.
 2. **A real competitor arm** — `mem0` (local, `infer=False`) run through the same
    reader and judge. Cost is the blocker for `infer=True`: it calls an LLM per
    message.
-3. **Budget-aware injection** — the k-sweep says 340 extra tokens buy ~9pp in the
-   oracle split; the hook should fill a token budget, not a fixed count.
+3. **More reads per question only where they pay** — the tool protocol's gain is
+   in temporal and multi-session questions; a router that sends only those through
+   multi-round retrieval would keep most of the +14pp at a fraction of the cost.
