@@ -317,7 +317,15 @@ After installing the bundle, the same CLI is linked into the profile at
 
 They're on by default, because automatic memory is the whole point of the thing.
 
-One thing they do **not** inject: upstream's `RECENT CONTEXT (last ~90 min)` block. It is
+**The closest hit arrives as full text.** A measured comparison (LongMemEval,
+n=120, 2026-10-30) showed that injecting pointer lines alone scores 31.7% while
+top-5 full-text retrieval scores 39.2% -- pointers only pay off when the model can
+expand them, which is why the agentic arm reached 52.5%. So the hook now inlines
+the **full text of the top one or two hits whose similarity is ≥ 0.6** and leaves
+the rest as pointers. `FLYMEMORY_HYBRID_FULL=0` returns to pointers-only;
+`FLYMEMORY_HYBRID_SIM` moves the threshold.
+
+One thing they do **not** inject: upstream`s `RECENT CONTEXT (last ~90 min)` block. It is
 a clock window over the whole library, and entries carry no session id — with several
 conversations sharing one store, it pulls another conversation's work into this one.
 Recall is scoped by the text you just typed instead. If you want the old behaviour,

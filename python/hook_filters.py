@@ -14,6 +14,7 @@ Set ``FLYMEMORY_RECENT_MINUTES=90`` to keep the first block (upstream behaviour)
 """
 
 import os
+import re
 
 
 def strip_recent(text: str) -> str:
@@ -36,3 +37,20 @@ def strip_recent(text: str) -> str:
             continue
         kept.append(line)
     return "\n".join(kept).strip()
+
+
+def high_sim_ids(text, limit=2, threshold=0.6):
+    """Ids of the closest high-similarity hits in a recall block.
+
+    Recall lines look like `[#19687 | 1.00 | app=dsh | age] summary`. Those with
+    similarity at or above `threshold` are the ones worth inlining as full text
+    (measured 2026-10-30: pointers alone underperform full text).
+    """
+    ids = []
+    for line in (text or "").splitlines():
+        match = re.match(r"\s*\[#(\d+)\s*\|\s*([0-9.]+)", line)
+        if match and float(match.group(2)) >= threshold:
+            ids.append(int(match.group(1)))
+        if len(ids) >= limit:
+            break
+    return ids

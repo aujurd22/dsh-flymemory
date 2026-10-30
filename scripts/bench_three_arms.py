@@ -1,32 +1,32 @@
 #!/usr/bin/env python3
-"""Three-arm memory benchmark: NoMemory vs RAG-top5 vs FlyMemory.
+"""Four-arm memory benchmark: NoMemory / RAG-top5 / FlyMemory / FlyMemory-hybrid.
 
-Pre-registered questions this answers (see docs/ROADMAP.md):
+Answers the questions docs/ROADMAP.md leaves open, with the reader held fixed:
 
-  * does the memory store beat no memory at all, with the reader held fixed?
+  * does the memory store beat no memory at all?
   * does it beat plain top-5 RAG on the same turns?
-  * does the pointer/agentic protocol (which is how the plugin actually works)
-    do better than stuffing full text into the prompt?
+  * does the pointer/agentic protocol (how the plugin actually works) beat
+    stuffing full text into the prompt?
+  * does injecting full text for the closest one or two hits make the one-shot
+    case competitive? (the `hybrid` arm -- the shape the hook now uses)
 
-Design, fixed on purpose:
+Fixed on purpose:
 
-  * reader  = one model for every arm, `reasoning_effort=off`, temperature 0
-  * judge   = the same model, one rubric, strict (correct) and weighted
-              (correct 1.0 / partial 0.5 / wrong 0)
-  * data    = LongMemEval oracle split: a fresh store per question, built from
-              that question's haystack sessions, so no arm sees more than another
-  * protocols = one-shot (bounded context, no tools) and agentic (the model may
-              search/read, capped at --max-rounds)
+  * reader and judge are one model with `reasoning_effort=off`, temperature 0
+  * a fresh store per question, built from that question's haystack, so no arm
+    sees more than another
+  * every answer is recorded per question and per question type, so comparisons
+    can be tested (exact McNemar) instead of eyeballed
 
 Usage:
-  python scripts/bench_three_arms.py --data D:/djr82/flymemory/data_longmemeval/longmemeval_oracle.json \
-      --sample 10 --arms nomem,rag,fly --protocols oneshot,agentic
-
-  CMDBASE=https://api.commandcode.ai/provider/v1 CMMODEL=deepseek/deepseek-v4.1-flash \
-  CMKEY=... python scripts/bench_three_arms.py --sample 10
+  CMDBASE=https://api.commandcode.ai/provider/v1 \
+  CMMODEL=deepseek/deepseek-v4.1-flash CMKEY=... \
+  python scripts/bench_three_arms.py --sample 200 --out reports/three_arms.json
 """
 import argparse
+import datetime
 import json
+import math
 import os
 import random
 import re
@@ -74,12 +74,10 @@ class Model:
         self.calls = 0
 
     def chat(self, messages, max_tokens=300, tools=None):
-        """Returns the assistant text (tool calls are dropped)."""
         message = self.chat_message(messages, max_tokens=max_tokens, tools=tools)
         return (message.get("content") or "").strip()
 
     def chat_message(self, messages, max_tokens=300, tools=None):
-        """Returns the whole assistant message (content + tool_calls)."""
         body = {
             "model": self.model,
             "messages": messages,
@@ -113,11 +111,9 @@ class Model:
 
 # ---------------------------------------------------------------- store build
 def parse_date(text):
-    """LongMemEval dates look like '2023/04/10 (Mon) 17:50'."""
     match = re.match(r"(\d{4})/(\d{2})/(\d{2})", text or "")
     if not match:
         return time.time()
-    import datetime
     year, month, day = (int(part) for part in match.groups())
     return datetime.datetime(year, month, day).timestamp()
 
@@ -142,45 +138,56 @@ def entry_by_id(memory, memory_id):
 
 
 def pointer_lines(hits):
-    out = []
+    lines = []
     for hit in hits:
         stamp = time.strftime("%Y-%m-%d", time.localtime(hit.timestamp))
-        out.append(f"[#{hit.memory_id} | {stamp} | {hit.source}] {hit.text[:110]}")
-    return "\n".join(out)
+        lines.append(f"[#{hit.memory_id} | {stamp} | {hit.source}] {hit.text[:110]}")
+    return "\n".join(lines)
+
+
+def retrieve(memory, question, top_k=8):
+    return [(entry, sim) for entry, sim, _score in memory.recall(question, top_k=top_k)]
 
 
 # ---------------------------------------------------------------- arms
-def run_nomem(question, record, model):
-    context = "(no memory available)"
-    answer = model.chat([
+def ask_with_context(model, question, record, context):
+    return model.chat([
         {"role": "system", "content": ANSWER_SYSTEM},
         {"role": "user", "content": f"Question date: {record['question_date']}\n"
                                     f"Memory context:\n{context}\n\nQuestion: {question}"},
     ])
-    return answer, 0
+
+
+def run_nomem(question, record, model):
+    return ask_with_context(model, question, record, "(no memory available)"), 0
 
 
 def run_rag(question, record, model, memory, topk=5):
-    hits = [entry for entry, _sim, _score in memory.recall(question, top_k=topk)]
-    context = "\n\n".join(hit.text for hit in hits) or "(nothing retrieved)"
-    answer = model.chat([
-        {"role": "system", "content": ANSWER_SYSTEM},
-        {"role": "user", "content": f"Question date: {record['question_date']}\n"
-                                    f"Memory context:\n{context}\n\nQuestion: {question}"},
-    ])
-    return answer, 0
+    hits = retrieve(memory, question, topk)
+    context = "\n\n".join(entry.text for entry, _sim in hits) or "(nothing retrieved)"
+    return ask_with_context(model, question, record, context), 0
 
 
 def run_fly_oneshot(question, record, model, memory, topk=8):
-    hits = [entry for entry, _sim, _score in memory.recall(question, top_k=topk)]
-    answer = model.chat([
-        {"role": "system", "content": ANSWER_SYSTEM},
-        {"role": "user", "content": f"Question date: {record['question_date']}\n"
-                                    f"Memory index (pointers only -- "
-                                    f"you cannot expand them in this run):\n"
-                                    f"{pointer_lines(hits)}\n\nQuestion: {question}"},
-    ])
-    return answer, 0
+    hits = retrieve(memory, question, topk)
+    context = ("Memory index (pointers only -- you cannot expand them in this run):\n"
+               + pointer_lines(entry for entry, _sim in hits))
+    return ask_with_context(model, question, record, context), 0
+
+
+def run_fly_hybrid(question, record, model, memory, topk=8, full=2, threshold=0.6):
+    """The hook shape: the closest hits arrive as full text, the rest as pointers."""
+    hits = retrieve(memory, question, topk)
+    expanded = [entry for entry, sim in hits[:full] if sim >= threshold]
+    expanded_ids = {entry.memory_id for entry in expanded}
+    parts = []
+    if expanded:
+        parts.append("Memory context (closest entries, full text):\n"
+                     + "\n\n".join(entry.text for entry in expanded))
+    pointers = [entry for entry, _sim in hits if entry.memory_id not in expanded_ids]
+    if pointers:
+        parts.append("Memory index (further pointers):\n" + pointer_lines(pointers))
+    return ask_with_context(model, question, record, "\n\n".join(parts) or "(nothing retrieved)"), 0
 
 
 TOOLS = [
@@ -202,7 +209,6 @@ TOOLS = [
 
 
 def run_fly_agentic(question, record, model, memory, max_rounds=3):
-    """The model drives retrieval through function calling: pointers, then reads."""
     messages = [
         {"role": "system", "content": AGENTIC_SYSTEM % max_rounds},
         {"role": "user", "content": f"Question date: {record['question_date']}\n"
@@ -225,9 +231,8 @@ def run_fly_agentic(question, record, model, memory, max_rounds=3):
             except Exception:                      # noqa: BLE001
                 arguments = {}
             if name == "search_memory":
-                hits = [entry for entry, _sim, _score in
-                        memory.recall(arguments.get("query") or question, top_k=8)]
-                result = pointer_lines(hits) or "(nothing found)"
+                hits = retrieve(memory, arguments.get("query") or question)
+                result = pointer_lines(entry for entry, _sim in hits) or "(nothing found)"
             elif name == "read_memory":
                 reads += 1
                 try:
@@ -242,6 +247,7 @@ def run_fly_agentic(question, record, model, memory, max_rounds=3):
     final = model.chat_message(messages, max_tokens=300)
     return (final.get("content") or "").strip(), reads
 
+
 # ---------------------------------------------------------------- judging
 def judge(model, question, truth, answer):
     raw = model.chat([
@@ -250,7 +256,20 @@ def judge(model, question, truth, answer):
                                     f"Model answer: {answer}"},
     ], max_tokens=120)
     match = re.search(r'"?score"?\s*:\s*"?(correct|partial|wrong)', raw or "", re.I)
-    return (match.group(1).lower() if match else "wrong"), raw
+    return (match.group(1).lower() if match else "wrong")
+
+
+def mcnemar_exact(first, second):
+    """Exact binomial McNemar on paired correct/wrong outcomes.
+
+    Returns (gained_by_first, lost_by_first, p)."""
+    gained = sum(1 for a, b in zip(first, second) if a and not b)
+    lost = sum(1 for a, b in zip(first, second) if b and not a)
+    n = gained + lost
+    if n == 0:
+        return gained, lost, 1.0
+    tail = sum(math.comb(n, k) for k in range(min(gained, lost) + 1)) / (2 ** n)
+    return gained, lost, min(1.0, 2 * tail)
 
 
 # ---------------------------------------------------------------- main
@@ -258,9 +277,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", default=os.environ.get(
         "LME_ORACLE", r"D:\djr82\flymemory\data_longmemeval\longmemeval_oracle.json"))
-    parser.add_argument("--sample", type=int, default=10)
+    parser.add_argument("--sample", type=int, default=20)
     parser.add_argument("--seed", type=int, default=7)
-    parser.add_argument("--arms", default="nomem,rag,fly")
+    parser.add_argument("--arms", default="nomem,rag,fly,hybrid")
     parser.add_argument("--protocols", default="oneshot,agentic")
     parser.add_argument("--out", default="")
     args = parser.parse_args()
@@ -277,58 +296,95 @@ def main():
     arms = [a.strip() for a in args.arms.split(",") if a.strip()]
     protocols = [p.strip() for p in args.protocols.split(",") if p.strip()]
 
-    # One client per arm keeps token accounting separate.
     clients = {arm: Model(base, key, model_id) for arm in arms}
     judge_client = Model(base, key, model_id)
 
+    # nomem/rag/hybrid are one-shot only; `fly` runs both protocols.
+    cells = [(arm, protocol) for protocol in protocols for arm in arms
+             if arm == "fly" or protocol == "oneshot"]
     stats = {f"{arm}/{protocol}": {"correct": 0, "partial": 0, "wrong": 0, "n": 0,
-                                   "rounds": 0}
-             for arm in arms for protocol in protocols}
+                                   "rounds": 0, "by_type": {}}
+             for arm, protocol in cells}
+    rows = []
     started = time.time()
 
     for index, record in enumerate(records, 1):
         question, truth = record["question"], record["answer"]
-        memory = build_store(record) if ("rag" in arms or "fly" in arms) else None
-        print(f"[{index}/{len(records)}] {record['question_type']}: {question[:70]}", flush=True)
-        for arm in arms:
-            for protocol in protocols:
-                if arm != "fly" and protocol == "agentic":
-                    continue      # a tool protocol only makes sense with pointers
-                if arm == "nomem":
-                    answer, rounds = run_nomem(question, record, clients[arm])
-                elif arm == "rag":
-                    answer, rounds = run_rag(question, record, clients[arm], memory)
-                elif protocol == "oneshot":
-                    answer, rounds = run_fly_oneshot(question, record, clients[arm], memory)
-                else:
-                    answer, rounds = run_fly_agentic(question, record, clients[arm], memory)
-                score, _raw = judge(judge_client, question, truth, answer)
-                key_name = f"{arm}/{protocol}"
-                stats[key_name][score] = stats[key_name].get(score, 0) + 1
-                stats[key_name]["n"] += 1
-                stats[key_name]["rounds"] += rounds
-                print(f"    {key_name:18} {score:8} {answer[:60]!r}", flush=True)
+        qtype = record.get("question_type", "?")
+        memory = None if all(arm == "nomem" for arm, _p in cells) else build_store(record)
+        print(f"[{index}/{len(records)}] {qtype}: {question[:70]}", flush=True)
+        for arm, protocol in cells:
+            name = f"{arm}/{protocol}"
+            if arm == "nomem":
+                answer, rounds = run_nomem(question, record, clients[arm])
+            elif arm == "rag":
+                answer, rounds = run_rag(question, record, clients[arm], memory)
+            elif arm == "hybrid":
+                answer, rounds = run_fly_hybrid(question, record, clients[arm], memory)
+            elif protocol == "oneshot":
+                answer, rounds = run_fly_oneshot(question, record, clients[arm], memory)
+            else:
+                answer, rounds = run_fly_agentic(question, record, clients[arm], memory)
+            score = judge(judge_client, question, truth, answer)
+            row = stats[name]
+            row[score] = row.get(score, 0) + 1
+            row["n"] += 1
+            row["rounds"] += rounds
+            bucket = row["by_type"].setdefault(qtype, {"correct": 0, "partial": 0,
+                                                       "wrong": 0, "n": 0})
+            bucket[score] += 1
+            bucket["n"] += 1
+            rows.append({"question_id": record.get("question_id"), "question_type": qtype,
+                         "arm": name, "score": score, "rounds": rounds,
+                         "answer": answer[:400]})
+            print(f"    {name:18} {score:8} {answer[:60]!r}", flush=True)
 
     elapsed = time.time() - started
     print("\n=== results ===")
+    strict = {}
     for name, row in stats.items():
         n = row["n"] or 1
-        strict = row["correct"] / n
+        strict[name] = row["correct"] / n
         weighted = (row["correct"] + 0.5 * row["partial"]) / n
-        print(f"{name:18} n={row['n']:3} strict={strict:6.1%} weighted={weighted:6.1%} "
-              f"rounds={row['rounds'] / n:4.1f}")
+        print(f"{name:18} n={row['n']:3} strict={strict[name]:6.1%} "
+              f"weighted={weighted:6.1%} rounds={row['rounds'] / n:4.1f}")
 
-    total = judge_client
+    print("\n=== by question type (strict) ===")
+    types = sorted({t for row in stats.values() for t in row["by_type"]})
+    print("type".ljust(30) + "".join(name.ljust(18) for name in stats))
+    for qtype in types:
+        line = qtype[:28].ljust(30)
+        for row in stats.values():
+            bucket = row["by_type"].get(qtype, {"n": 0, "correct": 0})
+            line += f"{bucket['correct']}/{bucket['n']}".ljust(18)
+        print(line)
+
+    print("\n=== paired tests (exact McNemar) ===")
+    def per_question(name):
+        return {row["question_id"]: row["score"] == "correct"
+                for row in rows if row["arm"] == name}
+
+    for left, right in (("fly/agentic", "rag/oneshot"), ("fly/agentic", "fly/oneshot"),
+                        ("hybrid/oneshot", "rag/oneshot"), ("hybrid/oneshot", "fly/oneshot"),
+                        ("hybrid/oneshot", "fly/agentic")):
+        if left in strict and right in strict:
+            first, second = per_question(left), per_question(right)
+            shared = sorted(set(first) & set(second))
+            gained, lost, p = mcnemar_exact([first[q] for q in shared],
+                                            [second[q] for q in shared])
+            print(f"{right:18} -> {left:18} gained={gained:3} lost={lost:3} p={p:.3f} "
+                  f"(n={len(shared)})")
+
     for arm in arms:
         used = clients[arm]
         print(f"tokens {arm:8} in={used.prompt_tokens:8} out={used.completion_tokens:7} "
               f"calls={used.calls}")
-    print(f"judge tokens in={total.prompt_tokens} out={total.completion_tokens}")
+    print(f"judge tokens in={judge_client.prompt_tokens} out={judge_client.completion_tokens}")
     print(f"elapsed {elapsed/60:.1f} min")
 
     if args.out:
         json.dump({"model": model_id, "sample": args.sample, "seed": args.seed,
-                   "base_url": base, "stats": stats, "elapsed_s": elapsed},
+                   "base_url": base, "elapsed_s": elapsed, "stats": stats, "rows": rows},
                   open(args.out, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
         print("report:", args.out)
 

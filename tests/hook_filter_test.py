@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "python"))
 
-from hook_filters import strip_recent  # noqa: E402
+from hook_filters import high_sim_ids, strip_recent  # noqa: E402
 
 RECALL = """RECALLED MEMORIES:
   [#19687 | 0.86 | app=dsh | 23分钟前(10-29)] 看一下zcode那边的更新
@@ -48,6 +48,17 @@ def test_block_at_end_of_output_is_removed():
     text = "RECALLED MEMORIES:\n  [#1 | a] x\nRECENT CONTEXT (last ~90 min):\n  [#2 | b] y"
     out = strip_recent(text)
     assert out == "RECALLED MEMORIES:\n  [#1 | a] x", repr(out)
+
+
+def test_high_sim_ids_picks_the_close_ones():
+    text = ("RECALLED MEMORIES:\n"
+            "  [#11 | 1.00 | app=dsh | 1h] exact echo\n"
+            "  [#12 | 0.71 | app=dsh | 2d] related\n"
+            "  [#13 | 0.42 | app=dsh | 3d] weak\n")
+    assert high_sim_ids(text) == [11, 12], high_sim_ids(text)
+    assert high_sim_ids(text, limit=1) == [11]
+    assert high_sim_ids(text, threshold=0.9) == [11]
+    assert high_sim_ids("no pointers here") == []
 
 
 if __name__ == "__main__":

@@ -15,12 +15,68 @@ stdin receives the hook JSON (prompt field); recall output is injected as
 additionalContext. Any error exits 0 silently — the service being down must
 never block a session.
 """
-import sys, os, json, argparse, urllib.request
+import sys, os, re, json, argparse, urllib.request
 
-from hook_filters import strip_recent
+from hook_filters import high_sim_ids, strip_recent
 
 DEFAULT_URL = "http://127.0.0.1:8791/mcp"
 
+
+def _rpc(url, tool, arguments, timeout=8):
+    """One tools/call round trip; returns the text blocks joined, or ''."""
+    body = json.dumps({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+                       "params": {"name": tool, "arguments": arguments}}).encode()
+    request = urllib.request.Request(url, data=body, headers={
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        raw = response.read().decode("utf-8", "replace")
+    parts = []
+    for line in raw.splitlines():
+        if line.startswith("data:"):
+            line = line[5:].strip()
+        try:
+            payload = json.loads(line)
+        except Exception:
+            continue
+        for block in payload.get("result", {}).get("content") or []:
+            if isinstance(block, dict):
+                parts.append(block.get("text", ""))
+    return "\n".join(parts).strip()
+
+
+def _expand_top_hits(text, url):
+    """Inline the full text of the closest high-similarity hits.
+
+    The recall block carries `sim=` per line; a one-line summary is a pointer, and
+    a measured experiment showed pointers alone underperform full text. Expanding
+    the top one or two costs a couple of local round trips, not model tokens.
+    """
+    try:
+        limit = int(os.environ.get("FLYMEMORY_HYBRID_FULL", "2"))
+    except ValueError:
+        limit = 2
+    if limit <= 0:
+        return text, ""
+    try:
+        threshold = float(os.environ.get("FLYMEMORY_HYBRID_SIM", "0.6"))
+    except ValueError:
+        threshold = 0.6
+    hits = high_sim_ids(text, limit=limit, threshold=threshold)
+    if not hits:
+        return text, ""
+    blocks = []
+    for memory_id in hits:
+        try:
+            full = _rpc(url, "flymemory_get_memory", {"memory_id": memory_id})
+        except Exception:
+            full = ""
+        if full:
+            blocks.append(full[:700])
+    if not blocks:
+        return text, ""
+    return text, ("[flymemory 全文 · 高相似命中（可直接引用，不必再查）]\n"
+                  + "\n---\n".join(blocks))
 
 def _resolve_url() -> str:
     """--url <value> / --url=<value> first, then FLYMEMORY_MCP_URL, then default."""
@@ -119,6 +175,16 @@ def main():
             lesson_text = ""
         # dsh-flymemory 适配：剥掉上游的 RECENT 时间窗与写入回执（见 hook_filters）
         text = strip_recent(text)
+        # 实测（2026-10-30，LongMemEval n=120）：只给一行摘要的注入弱于塞全文
+        # （31.7% vs 39.2%），而 agentic 拉全文能到 52.5%。所以这里对**高相似**
+        # 的 top-1/2 直接注入全文，其余仍只给指针——保住 token 又不把最可能用到
+        # 的那条降级成摘要。FLYMEMORY_HYBRID_FULL=0 关闭；FLYMEMORY_HYBRID_SIM 调门槛。
+        text, expanded_note = _expand_top_hits(text, URL)
+        if expanded_note:
+            # 给了全文，就别再让模型"去 get_memory 取全文"了
+            text = "\n".join(line for line in text.splitlines()
+                             if not line.strip().startswith("HINT:"))
+            text = text + "\n\n" + expanded_note
 
         # 乱回忆门: top-1 相似度过低说明当前消息与库内记忆无实质关联——
         # 硬塞 5 条弱相关条目只会制造时序混乱和噪音。低置信时只保留
