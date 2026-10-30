@@ -43,7 +43,7 @@ knowledge-update 60% vs 56%, preference 10% vs 3%.
 
 ## Long split — haystack does not fit (~153k tokens/question)
 
-n=40:
+n=150:
 
 | arm | strict | weighted | prompt tokens / answer |
 |---|---|---|---|
