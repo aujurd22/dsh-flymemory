@@ -190,6 +190,34 @@ def run_fly_hybrid(question, record, model, memory, topk=8, full=2, threshold=0.
     return ask_with_context(model, question, record, "\n\n".join(parts) or "(nothing retrieved)"), 0
 
 
+def build_transcript(record, max_chars=200_000):
+    """The whole haystack conversation, oldest first -- LongMemEval's oracle setting."""
+    parts, truncated = [], False
+    for date_text, session in zip(record.get("haystack_dates", []),
+                                  record.get("haystack_sessions", [])):
+        for turn in session:
+            role = turn.get("role") or "user"
+            content = (turn.get("content") or "").strip()
+            if content:
+                parts.append(f"[{date_text}] {role}: {content}")
+    text = "\n".join(parts)
+    if len(text) > max_chars:
+        text, truncated = text[:max_chars], True
+    return text, truncated
+
+
+def run_fullctx(question, record, model, memory, max_chars=200_000):
+    """Strongest structure-free baseline: the entire history in one prompt.
+
+    If the memory store still beats this, the win is not "more text". If it does
+    not, our retrieval is losing information that simply reading everything keeps.
+    """
+    transcript, truncated = build_transcript(record, max_chars)
+    context = ("Full conversation history (oldest first):\n" + transcript
+               + ("\n[... truncated ...]" if truncated else ""))
+    return ask_with_context(model, question, record, context), 0
+
+
 def run_profile(question, record, model, memory, topk=6):
     """Aggregate a compact profile from memory before answering.
 
@@ -298,9 +326,10 @@ def main():
         "LME_ORACLE", r"D:\djr82\flymemory\data_longmemeval\longmemeval_oracle.json"))
     parser.add_argument("--sample", type=int, default=20)
     parser.add_argument("--seed", type=int, default=7)
-    parser.add_argument("--arms", default="nomem,rag,fly,profile,agentic1,agentic2,agentic3")
+    parser.add_argument("--arms", default="nomem,rag,fly,profile,fullctx,agentic2,agentic3")
     parser.add_argument("--protocols", default="")
     parser.add_argument("--max-rounds", type=int, default=3)
+    parser.add_argument("--fullctx-chars", type=int, default=200_000)
     parser.add_argument("--out", default="")
     args = parser.parse_args()
 
@@ -331,7 +360,8 @@ def main():
     for index, record in enumerate(records, 1):
         question, truth = record["question"], record["answer"]
         qtype = record.get("question_type", "?")
-        memory = None if all(arm == "nomem" for arm in cells) else build_store(record)
+        needs_store = any(arm not in ("nomem", "fullctx") for arm in cells)
+        memory = build_store(record) if needs_store else None
         print(f"[{index}/{len(records)}] {qtype}: {question[:70]}", flush=True)
         for arm in cells:
             name = arm
@@ -339,8 +369,14 @@ def main():
                 answer, rounds = run_nomem(question, record, clients[arm])
             elif arm == "rag":
                 answer, rounds = run_rag(question, record, clients[arm], memory)
+            elif arm.startswith("rag"):
+                topk = int(arm[3:] or 5)
+                answer, rounds = run_rag(question, record, clients[arm], memory, topk=topk)
             elif arm == "hybrid":
                 answer, rounds = run_fly_hybrid(question, record, clients[arm], memory)
+            elif arm == "fullctx":
+                answer, rounds = run_fullctx(question, record, clients[arm], memory,
+                                                 max_chars=args.fullctx_chars)
             elif arm == "profile":
                 answer, rounds = run_profile(question, record, clients[arm], memory)
             elif arm.startswith("agentic"):
@@ -388,7 +424,8 @@ def main():
         return {row["question_id"]: row["score"] == "correct"
                 for row in rows if row["arm"] == name}
 
-    pair_list = [("agentic3", "rag"), ("agentic3", "fly"), ("profile", "rag"),
+    pair_list = [("agentic3", "rag"), ("agentic3", "fly"), ("fullctx", "rag"),
+                 ("agentic3", "fullctx"), ("agentic2", "fullctx"),
                  ("agentic1", "rag"), ("agentic2", "agentic1"), ("agentic3", "agentic2"),
                  ("profile", "agentic3")]
     for left, right in pair_list:

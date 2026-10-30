@@ -84,6 +84,49 @@ weak: temporal reasoning (+11/47) and multi-session questions (+5/55).
    easier -- the win there would have to come from answer-side presentation, not
    from retrieval.
 
+### The headline run: 500 questions
+
+| arm | strict | weighted | prompt tokens / answer |
+|---|---|---|---|
+| no memory | 2.8% | 4.3% | ~98 |
+| RAG top-5 | 40.6% | 43.5% | ~213 |
+| agentic, 2 rounds | 51.8% | 56.4% | ~2,150 |
+| **agentic, 3 rounds** | **54.8%** | **60.6%** | ~2,900 |
+
+Paired: RAG -> agentic3 gains 94 / loses 23 (**p<0.0001**, +14.2pp);
+agentic2 -> agentic3 gains 34 / loses 19 (p=0.053, +3.0pp for +35% tokens).
+
+By type (strict): temporal-reasoning 34% -> 59% (**+25pp**), multi-session 32% ->
+41%, single-session-assistant 38% -> 66%, single-session-user 71% -> 79%,
+knowledge-update 56% -> 60%, preference 3% -> 17%. The win is concentrated in
+questions that need more than one fact and a sense of *when* -- which is what the
+state chain was built for; knowledge-update stays flat, as it did at n=120 and
+n=200.
+
+Default guidance is now 1-2 reads with a 3-round ceiling: the third round buys
+3pp for 35% more tokens and does not clear p<0.05 at n=500.
+
+### The uncomfortable control: full context beats us on short haystacks
+
+On the same 120 questions of the oracle split (haystack ~6k tokens, so it *fits*
+in a prompt), dumping the whole history scores **76.7%** strict against our best
+56.7% (McNemar +35/-11, p=0.0005). A k-sweep says why: score tracks how much
+history reaches the reader, monotonically -- top-5 40.0%, top-10 44.2%, top-20
+49.2%, top-50 56.7%, all-context 76.7%. Retrieval here is lossy compression, not
+purification.
+
+Three consequences, all acted on:
+
+1. **Positioning**: on histories that fit in the window, a memory system cannot
+   win on accuracy. It wins on length (LongMemEval-S is 153k tokens/question),
+   cost, and operations. That is the experiment that decides the claim.
+2. **Defaults were too small**: top-5 costs 40% where top-20 costs 49% for +340
+   tokens. Injection should be budget-aware (fill a token budget, not a fixed
+   count), which is what the hook and working context now do.
+3. **Agentic efficiency**: 3 rounds ties top-50 retrieval (56.7%) at 2.6x the
+   tokens, so multi-round tool use only pays when the question needs *targeted*
+   reads, not when it needs *volume*.
+
 ### The rounds curve, and a second falsified prediction (120 questions)
 
 Adding the rounds dimension as separate arms (`agentic1/2/3`) and a lightweight
