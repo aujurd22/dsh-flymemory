@@ -281,6 +281,7 @@ def main():
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--arms", default="nomem,rag,fly,hybrid")
     parser.add_argument("--protocols", default="oneshot,agentic")
+    parser.add_argument("--max-rounds", type=int, default=3)
     parser.add_argument("--out", default="")
     args = parser.parse_args()
 
@@ -324,7 +325,8 @@ def main():
             elif protocol == "oneshot":
                 answer, rounds = run_fly_oneshot(question, record, clients[arm], memory)
             else:
-                answer, rounds = run_fly_agentic(question, record, clients[arm], memory)
+                answer, rounds = run_fly_agentic(question, record, clients[arm], memory,
+                                                  max_rounds=args.max_rounds)
             score = judge(judge_client, question, truth, answer)
             row = stats[name]
             row[score] = row.get(score, 0) + 1

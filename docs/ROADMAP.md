@@ -29,37 +29,69 @@ Two results from 2026 shape the plan more than any feature list:
   projects like [waxseal](https://pypi.org/project/waxseal/) / ontogr-mem are
   shipping tamper-evident, hash-chained memory ledgers.
 
-## Measured, 2026-10-30: three arms, one reader
+## Measured, 2026-10-30: four arms, 200 questions, one reader
 
-`scripts/bench_three_arms.py`, LongMemEval oracle, 120 questions, reader and
-judge both `deepseek/deepseek-v4.1-flash` with `reasoning_effort=off`,
-temperature 0, a fresh store per question:
+`scripts/bench_three_arms.py`, LongMemEval oracle, 200 questions, reader and judge
+both `deepseek/deepseek-v4.1-flash` with `reasoning_effort=off`, temperature 0, a
+fresh store per question, every answer scored by the same rubric:
 
 | arm | strict | weighted | prompt tokens / answer |
 |---|---|---|---|
-| no memory | 3.3% | 5.0% | ~100 |
-| RAG top-5, full text | 39.2% | 44.6% | ~210 |
-| FlyMemory, pointers only (one-shot) | 31.7% | 37.1% | — |
-| **FlyMemory, agentic (search + read)** | **52.5%** | **56.7%** | **~1,690** |
+| no memory | 3.5% | 4.8% | ~100 |
+| RAG top-5, full text | 41.0% | 44.8% | ~215 |
+| FlyMemory, pointers only | 36.0% | 39.8% | — |
+| FlyMemory, pointers + top-2 inlined | 37.0% | 40.8% | ~375 |
+| **FlyMemory, agentic (search + read)** | **54.0%** | **59.2%** | ~3,300 |
 
-Three things follow, and two of them are uncomfortable:
+Paired tests (exact McNemar, n=200):
 
-1. **The protocol is the advantage, not the store alone.** Agentic retrieval beats
-   top-5 RAG by **+13.3pp strict** at the same reader. That is the pre-registered
-   bar (+5pp) cleared with room.
-2. **Pointers alone lose to RAG** (31.7% vs 39.2%). Pointing is only worth it when
-   the model can expand a pointer; injecting an index without the tool path is
-   actively worse than dumping five full entries. This is the same shape P-USEGATE
-   measured from the other direction.
-3. **It costs ~8x the prompt tokens** (+13.3pp for 8x, versus P-USEGATE's +10.5pp
-   for 12x). Worth it, and reducible: the run averaged 1.9 reads per question.
+| comparison | gained | lost | p |
+|---|---|---|---|
+| RAG → agentic | 37 | 11 | **<0.001** |
+| pointers → agentic | 43 | 7 | **<0.001** |
+| RAG → inlined top-2 | 14 | 22 | 0.243 |
+| pointers → inlined top-2 | 10 | 8 | 0.815 |
+| agentic → inlined top-2 | 9 | 43 | <0.001 |
 
-Caveats to fix before calling it a benchmark result: per-question rows are not
-stored yet, so there is no paired significance test (the unpaired estimate is
-~2 sigma), and the numbers are not broken down by question type — the prediction
-that *knowledge-update* is where this design is strongest is still untested.
+By question type (strict, correct/total):
 
-## Where we actually stand
+| type | none | RAG | pointers | +top-2 | agentic |
+|---|---|---|---|---|---|
+| temporal-reasoning | 1/47 | 14/47 | 16/47 | 16/47 | **25/47** |
+| multi-session | 5/55 | 20/55 | 12/55 | 13/55 | **25/55** |
+| single-session-user | 1/27 | 18/27 | 15/27 | 17/27 | **22/27** |
+| single-session-assistant | 0/25 | 10/25 | 10/25 | 10/25 | **15/25** |
+| knowledge-update | 0/35 | 19/35 | 19/35 | 18/35 | 19/35 |
+| single-session-preference | 0/11 | 1/11 | 0/11 | 0/11 | 2/11 |
+
+### What this confirms
+
+**The protocol is the advantage.** Agentic retrieval beats top-5 RAG by 13 points
+with the same reader and the same store, and the pairing is decisive (37 vs 11
+discordant, p<0.001). The gain concentrates exactly where a flat store should be
+weak: temporal reasoning (+11/47) and multi-session questions (+5/55).
+
+### Two predictions this falsifies
+
+1. **"Inlining the closest hit fixes the one-shot case."** It does not: 37.0% vs
+   36.0% for pointers alone (p=0.815), and still below RAG's 41.0%. The hook
+   feature is therefore off by default, kept only as `FLYMEMORY_HYBRID_FULL`.
+   Pointers are only worth emitting when the model can expand them -- which is the
+   P-USEGATE lesson restated from the injection side.
+2. **"Knowledge-update is our strongest quadrant."** It is not: every arm lands on
+   19/35, i.e. the reader resolves those questions regardless of how the memory is
+   presented. Supersede keeps the store clean, but it does not make the answer
+   easier -- the win there would have to come from answer-side presentation, not
+   from retrieval.
+
+### What it costs, and the gaps it leaves
+
+Agentic costs ~15x the prompt tokens of RAG for 13 points, at 1.8 reads per
+question. The preference category fails for every arm (1/11 at best): those
+questions want a synthesised user profile, which this design deliberately does not
+build. Both are the next measurement, not a mystery.
+
+## Where we actually stand## Where we actually stand
 
 Measured on the live store:
 

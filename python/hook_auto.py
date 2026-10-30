@@ -53,7 +53,7 @@ def _expand_top_hits(text, url):
     the top one or two costs a couple of local round trips, not model tokens.
     """
     try:
-        limit = int(os.environ.get("FLYMEMORY_HYBRID_FULL", "2"))
+        limit = int(os.environ.get("FLYMEMORY_HYBRID_FULL", "0"))
     except ValueError:
         limit = 2
     if limit <= 0:
@@ -175,10 +175,10 @@ def main():
             lesson_text = ""
         # dsh-flymemory 适配：剥掉上游的 RECENT 时间窗与写入回执（见 hook_filters）
         text = strip_recent(text)
-        # 实测（2026-10-30，LongMemEval n=120）：只给一行摘要的注入弱于塞全文
-        # （31.7% vs 39.2%），而 agentic 拉全文能到 52.5%。所以这里对**高相似**
-        # 的 top-1/2 直接注入全文，其余仍只给指针——保住 token 又不把最可能用到
-        # 的那条降级成摘要。FLYMEMORY_HYBRID_FULL=0 关闭；FLYMEMORY_HYBRID_SIM 调门槛。
+        # 实测（2026-10-30，LongMemEval n=200）：只给指针 36.0%，塞 5 条全文 41.0%，
+        # 内联 top-2 全文 37.0%（p=0.815，与纯指针无差别）——这条改动实测无效，
+        # 所以默认关闭；agentic（模型自己去读）才是真正的赢法（54.0%，p<0.001）。
+        # 需要时用 FLYMEMORY_HYBRID_FULL=1/2 打开这份"高相似内联全文"的旧行为。
         text, expanded_note = _expand_top_hits(text, URL)
         if expanded_note:
             # 给了全文，就别再让模型"去 get_memory 取全文"了

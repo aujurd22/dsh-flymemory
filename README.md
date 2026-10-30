@@ -317,13 +317,14 @@ After installing the bundle, the same CLI is linked into the profile at
 
 They're on by default, because automatic memory is the whole point of the thing.
 
-**The closest hit arrives as full text.** A measured comparison (LongMemEval,
-n=120, 2026-10-30) showed that injecting pointer lines alone scores 31.7% while
-top-5 full-text retrieval scores 39.2% -- pointers only pay off when the model can
-expand them, which is why the agentic arm reached 52.5%. So the hook now inlines
-the **full text of the top one or two hits whose similarity is ≥ 0.6** and leaves
-the rest as pointers. `FLYMEMORY_HYBRID_FULL=0` returns to pointers-only;
-`FLYMEMORY_HYBRID_SIM` moves the threshold.
+**A measured comparison, and what it changed.** LongMemEval oracle, 200 questions,
+one reader (2026-10-30): no memory 3.5%, top-5 full text 41.0%, pointer lines only
+36.0%, pointers plus the top two hits inlined 37.0%, and the agentic protocol --
+the model searches and reads what it needs -- **54.0%** (McNemar against top-5:
+p<0.001). Two conclusions: the gain lives in *letting the model pull*, not in
+prettier injection; and inlining the closest hits changes nothing (37.0 vs 36.0,
+p=0.815), which is why `FLYMEMORY_HYBRID_FULL` defaults to off and exists only as
+an experiment switch.
 
 One thing they do **not** inject: upstream`s `RECENT CONTEXT (last ~90 min)` block. It is
 a clock window over the whole library, and entries carry no session id — with several
