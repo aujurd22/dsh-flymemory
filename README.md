@@ -271,6 +271,7 @@ patch entry replaces the whole `config`, so write out everything you need:
     workingContextSource: index # index = retrieve against this step's text; pack = clock window
     workingContextTopK: 8       # pointers per digest in index mode
     useGate: true               # account injected pointers -> expansions/re-calls
+    recallProtocol: true        # tell the model to pull before answering (see below)
     # engine-side: FLYMEMORY_SAVE_DEBOUNCE=5 (seconds) batches disk writes; 0 = write-through
     writeHooksConfig: true      # also write hooks.json for clients outside DSH
     seedFromUpstream: false     # don't import another library implicitly
@@ -375,6 +376,12 @@ sounds: the store has no session id, so any time-windowed digest is store-wide â
 it shows whatever any host wrote last, and that is exactly how another
 conversation's task leaks into this one. `workingContextSource: pack` restores
 the old clock-windowed behaviour if you want it.
+
+**A short memory protocol rides along.** Because the measured gain comes from the
+model *choosing* to pull (54.0% vs 41.0%, see below), the plugin adds one system
+section: when an answer depends on an earlier session, call
+`flymemory_recall_index` first, `flymemory_get_memory` for the pointers the answer
+hinges on, then answer with the id cited. `recallProtocol: false` removes it.
 
 The model pulls the full text; the plugin never expands a pointer itself. That split is deliberate â€” upstream
 measured the pointer form at +10.5pp evidence coverage **only when the pointer

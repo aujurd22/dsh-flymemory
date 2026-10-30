@@ -233,6 +233,7 @@ harness 启动时第一行先探 `127.0.0.1:8791`：已经有 FlyMemory 服务�
     workingContextSource: index # index=按本轮文本检索；pack=时间窗口（会跨会话）
     workingContextTopK: 8       # index 模式下每次给几条指针
     useGate: true               # 记录「注入的指针有没有被展开/再召/取代」
+    recallProtocol: true        # 提示模型「先拉再答」（见下）
     # 引擎侧：FLYMEMORY_SAVE_DEBOUNCE=5（秒）合并落盘；0 = 每次写都落盘
     writeHooksConfig: true      # 同时给 DSH 之外的客户端写 hooks.json
     seedFromUpstream: false     # 默认不导入别的库
@@ -317,7 +318,12 @@ node bin/flymemory.mjs version      # 本机这版 vs npm 上最新
 这点比听起来重要：库里没有会话 id，所以任何「最近 N 分钟」的摘要都是全库的——它会显示
 任何客户端最后写的东西，那正是「别的会话的任务串进来」的原因。想看旧行为可以设
 `workingContextSource: pack`。块头明确
-写着「要读正文请先 `flymemory_get_memory(id)`」。正文由模型自己拉，插件**从不替它展开**。
+写着「要读正文请先 `flymemory_get_memory(id)`」。**还会附带一段很短的「记忆协议」。** 因为实测的增益来自模型**主动去拉**（54.0% vs 41.0%，
+见下），插件加了一节系统提示：涉及早前会话的答案，先 `flymemory_recall_index` 拿指针，
+再对「答案真正依赖的那几条」调用 `flymemory_get_memory`，最后带着 id 回答。
+`recallProtocol: false` 可关掉。
+
+正文由模型自己拉，插件**从不替它展开**。
 这个分工是被测出来的：上游 P-USEGATE（2026-10-26）里指针形态的证据覆盖 +10.5pp，只在
 「指针被跟着展开」时成立，而那次展开把池 token 推到 **12.15 倍**——所以展开始终是模型的
 决定。它是 optional context：运行时抑制器能去掉、`dsh-flymemory mute` 能临时静音、服务挂了

@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import {
   CHECKPOINT_CONTRACT,
   CHECKPOINT_SECTION_NAME,
+  RECALL_PROTOCOL_SECTION_NAME,
   WORKING_CONTEXT_NAME,
   checkpointTextOf,
   createContextBand,
@@ -51,6 +52,8 @@ const options = (extra = {}) => ({
   contextOrder: 15000,
   checkpointContract: true,
   contractOrder: 12000,
+  recallProtocol: true,
+  protocolOrder: 11000,
   archiveCheckpoints: true,
   useGate: true,
   hookTimeoutMs: 6000,
@@ -155,7 +158,7 @@ describe('registerContextBand', () => {
     const band = { textFor: () => digest, refresh: async () => false, stats: () => ({ chars: 0, agents: 0 }) }
     registerContextBand(ctx, options(), band, { info() {}, warn() {} }, { storeCheckpoint: async () => {} })
 
-    assert.deepEqual(injected, [['systemPrompt'], ['systemPrompt']])
+    assert.deepEqual(injected, [['systemPrompt'], ['systemPrompt'], ['systemPrompt']])
     assert.equal(contexts.length, 1)
     const entry = contexts[0]
     assert.equal(entry.name, WORKING_CONTEXT_NAME)
@@ -165,9 +168,12 @@ describe('registerContextBand', () => {
     digest = '<working-context>x</working-context>'
     assert.match(entry.text({ agent: { id: 'a' } }), /working-context/)
 
-    assert.equal(sections.length, 1)
-    assert.equal(sections[0].name, CHECKPOINT_SECTION_NAME)
-    assert.equal(sections[0].text, CHECKPOINT_CONTRACT)
+    assert.equal(sections.length, 2)
+    const byName = Object.fromEntries(sections.map((entry) => [entry.name, entry]))
+    assert.equal(byName[CHECKPOINT_SECTION_NAME].text, CHECKPOINT_CONTRACT)
+    assert.equal(byName[RECALL_PROTOCOL_SECTION_NAME].order, 11000)
+    assert.match(byName[RECALL_PROTOCOL_SECTION_NAME].text, /flymemory_get_memory/)
+    assert.match(byName[RECALL_PROTOCOL_SECTION_NAME].text, /54\.0%/)
   })
 
   it('archives only real compaction summaries', async () => {
@@ -202,7 +208,7 @@ describe('registerContextBand', () => {
     const band = { textFor: () => '', refresh: async () => false, stats: () => ({ chars: 0, agents: 0 }) }
     registerContextBand(
       ctx,
-      options({ workingContext: false, checkpointContract: false, archiveCheckpoints: false }),
+      options({ workingContext: false, checkpointContract: false, archiveCheckpoints: false, recallProtocol: false }),
       band,
       { info() {}, warn() {} },
       { storeCheckpoint: async () => {} },

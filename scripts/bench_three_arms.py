@@ -190,6 +190,25 @@ def run_fly_hybrid(question, record, model, memory, topk=8, full=2, threshold=0.
     return ask_with_context(model, question, record, "\n\n".join(parts) or "(nothing retrieved)"), 0
 
 
+def run_profile(question, record, model, memory, topk=6):
+    """Aggregate a compact profile from memory before answering.
+
+    Preference questions score ~1/11 for every retrieval arm because they need a
+    synthesised picture of the user, not one matching turn. This arm tests the
+    cheapest version of that idea: several preference-oriented queries, dedup the
+    hits, and give the reader a profile block instead of raw turns.
+    """
+    seen = {}
+    for query in ("user preferences likes dislikes", "favorite preferred style",
+                  "always never prefers", question):
+        for entry, _sim, _score in memory.recall(query, top_k=topk):
+            seen[entry.memory_id] = entry
+    lines = [f"- {entry.text[:220]}" for entry in seen.values()]
+    context = ("User profile assembled from memory:\n" + "\n".join(lines)
+               if lines else "(no profile entries)")
+    return ask_with_context(model, question, record, context), 0
+
+
 TOOLS = [
     {"type": "function", "function": {
         "name": "search_memory",
@@ -279,8 +298,8 @@ def main():
         "LME_ORACLE", r"D:\djr82\flymemory\data_longmemeval\longmemeval_oracle.json"))
     parser.add_argument("--sample", type=int, default=20)
     parser.add_argument("--seed", type=int, default=7)
-    parser.add_argument("--arms", default="nomem,rag,fly,hybrid")
-    parser.add_argument("--protocols", default="oneshot,agentic")
+    parser.add_argument("--arms", default="nomem,rag,fly,profile,agentic1,agentic2,agentic3")
+    parser.add_argument("--protocols", default="")
     parser.add_argument("--max-rounds", type=int, default=3)
     parser.add_argument("--out", default="")
     args = parser.parse_args()
@@ -300,33 +319,36 @@ def main():
     clients = {arm: Model(base, key, model_id) for arm in arms}
     judge_client = Model(base, key, model_id)
 
-    # nomem/rag/hybrid are one-shot only; `fly` runs both protocols.
-    cells = [(arm, protocol) for protocol in protocols for arm in arms
-             if arm == "fly" or protocol == "oneshot"]
-    stats = {f"{arm}/{protocol}": {"correct": 0, "partial": 0, "wrong": 0, "n": 0,
-                                   "rounds": 0, "by_type": {}}
-             for arm, protocol in cells}
+    # Each arm is self-describing now: agenticN = the tool protocol capped at N
+    # rounds, so the cost/accuracy curve is one run instead of one run per N.
+    cells = list(arms)
+    stats = {arm: {"correct": 0, "partial": 0, "wrong": 0, "n": 0,
+                   "rounds": 0, "by_type": {}}
+             for arm in cells}
     rows = []
     started = time.time()
 
     for index, record in enumerate(records, 1):
         question, truth = record["question"], record["answer"]
         qtype = record.get("question_type", "?")
-        memory = None if all(arm == "nomem" for arm, _p in cells) else build_store(record)
+        memory = None if all(arm == "nomem" for arm in cells) else build_store(record)
         print(f"[{index}/{len(records)}] {qtype}: {question[:70]}", flush=True)
-        for arm, protocol in cells:
-            name = f"{arm}/{protocol}"
+        for arm in cells:
+            name = arm
             if arm == "nomem":
                 answer, rounds = run_nomem(question, record, clients[arm])
             elif arm == "rag":
                 answer, rounds = run_rag(question, record, clients[arm], memory)
             elif arm == "hybrid":
                 answer, rounds = run_fly_hybrid(question, record, clients[arm], memory)
-            elif protocol == "oneshot":
-                answer, rounds = run_fly_oneshot(question, record, clients[arm], memory)
-            else:
+            elif arm == "profile":
+                answer, rounds = run_profile(question, record, clients[arm], memory)
+            elif arm.startswith("agentic"):
+                rounds_cap = int(arm.replace("agentic", "") or args.max_rounds)
                 answer, rounds = run_fly_agentic(question, record, clients[arm], memory,
-                                                  max_rounds=args.max_rounds)
+                                                 max_rounds=rounds_cap)
+            else:
+                answer, rounds = run_fly_oneshot(question, record, clients[arm], memory)
             score = judge(judge_client, question, truth, answer)
             row = stats[name]
             row[score] = row.get(score, 0) + 1
@@ -366,9 +388,10 @@ def main():
         return {row["question_id"]: row["score"] == "correct"
                 for row in rows if row["arm"] == name}
 
-    for left, right in (("fly/agentic", "rag/oneshot"), ("fly/agentic", "fly/oneshot"),
-                        ("hybrid/oneshot", "rag/oneshot"), ("hybrid/oneshot", "fly/oneshot"),
-                        ("hybrid/oneshot", "fly/agentic")):
+    pair_list = [("agentic3", "rag"), ("agentic3", "fly"), ("profile", "rag"),
+                 ("agentic1", "rag"), ("agentic2", "agentic1"), ("agentic3", "agentic2"),
+                 ("profile", "agentic3")]
+    for left, right in pair_list:
         if left in strict and right in strict:
             first, second = per_question(left), per_question(right)
             shared = sorted(set(first) & set(second))
