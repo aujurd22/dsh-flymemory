@@ -60,6 +60,25 @@ n=40:
 - the oracle-split advantage of full context **disappears** when the history is
   long: 76.7% → 52.5%.
 
+## Injection shape (120 questions)
+
+The hook used to inject five one-line summaries. Since the k-sweep showed the
+score tracks how much history reaches the reader, 1.6.0 fills a character budget
+instead (`flymemory_recall_block`, 6000 chars by default):
+
+| injection | strict | prompt tokens / answer |
+|---|---|---|
+| 5 one-line summaries (the old default) | 40.0% | ~210 |
+| 20 full entries | 48.3% | ~545 |
+| **budgeted block (6000 chars)** | **50.8%** | ~1,095 |
+| 50 full entries | 56.7% | ~1,130 |
+
+So the change is worth it against what it replaced: **+10.8pp for ~+900 tokens**.
+But at the same token cost, simply taking more full entries (top-50, 56.7%) still
+edges out the 6000-char packing (50.8%) -- the packing is a bound, not a better
+selector. The plateau is around 50-57% for every one-shot injection, which is why
+the next real lever is the tool protocol (+14.2pp at n=500), not more text.
+
 ## mem0, on the same ruler (120 questions)
 
 `mem0ai` 2.2.1, local Qdrant, `infer=False` (pure store, no LLM extraction), the
