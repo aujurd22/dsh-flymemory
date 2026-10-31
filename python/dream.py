@@ -27,7 +27,25 @@ import re
 import os
 import sys
 import time
+import urllib.error
 import urllib.request
+
+# Free OpenAI-compatible endpoints. "amd" is the one measured here; the others are
+# the well-known free tiers (see github.com/vava-nessa/free-coding-models and
+# github.com/ClawLabsAI/free-ai-models). Model names drift, so a provider whose
+# configured model is rejected falls back to whatever /models reports.
+PROVIDERS = {
+    "amd":        ("https://developer.amd.com.cn/radeon/api/v1", "Qwen3.8-Flash-Next"),
+    "groq":       ("https://api.groq.com/openai/v1", "openai/gpt-oss-20b"),
+    "cerebras":   ("https://api.cerebras.ai/v1", "gpt-oss-120b"),
+    "nvidia":     ("https://integrate.api.nvidia.com/v1", "openai/gpt-oss-20b"),
+    "openrouter": ("https://openrouter.ai/api/v1", "openai/gpt-oss-20b:free"),
+    "pollinations": ("https://text.pollinations.ai/openai", "openai"),
+}
+KEY_ENV = {"amd": ("FLYMEMORY_DREAM_API_KEY", "AMDRADEON_API_KEY"),
+           "groq": ("GROQ_API_KEY",), "cerebras": ("CEREBRAS_API_KEY",),
+           "nvidia": ("NVIDIA_API_KEY",), "openrouter": ("OPENROUTER_API_KEY",),
+           "pollinations": ("POLLINATIONS_API_KEY",)}
 
 DEFAULT_BASE = "https://developer.amd.com.cn/radeon/api/v1"
 DEFAULT_MODEL = "Qwen3.8-Flash-Next"
@@ -76,35 +94,75 @@ def _clean_json_text(text):
     return text.strip()
 
 
-def llm_chat(system, user, max_tokens=900, model=None):
-    """One OpenAI-compatible chat call; returns text ('' when nothing usable)."""
-    key = api_key()
-    if not key:
-        return ""
-    base = os.environ.get("FLYMEMORY_DREAM_BASE_URL", DEFAULT_BASE).rstrip("/")
-    chosen = model or os.environ.get("FLYMEMORY_DREAM_MODEL", DEFAULT_MODEL)
-    # The free endpoint returns 502 under load, so a chain with a retry each is the
-    # difference between "dream does something" and "dream silently does nothing".
-    chain = [chosen] + [m for m in FALLBACK_MODELS if m != chosen]
+def _provider_chain():
+    """(name, base_url, model, key) in the order to try them."""
+    configured = (os.environ.get("FLYMEMORY_DREAM_PROVIDERS")
+                  or os.environ.get("FLYMEMORY_DREAM_PROVIDER") or "amd")
+    chain = []
+    for name in [n.strip() for n in configured.split(",") if n.strip()]:
+        base, model = PROVIDERS.get(name, (os.environ.get("FLYMEMORY_DREAM_BASE_URL",
+                                                          DEFAULT_BASE), DEFAULT_MODEL))
+        base = os.environ.get("FLYMEMORY_DREAM_BASE_URL", base)
+        model = os.environ.get("FLYMEMORY_DREAM_MODEL", model)
+        key = ""
+        for env_name in KEY_ENV.get(name, ()):
+            key = os.environ.get(env_name, "")
+            if key:
+                break
+        if key:
+            chain.append((name, base.rstrip("/"), model, key))
+    return chain
 
-    for candidate in chain:
+
+def _discover_model(base, key):
+    """Ask /models for a usable id when the configured name is rejected."""
+    try:
+        request = urllib.request.Request(
+            base + "/models",
+            headers={"Authorization": "Bearer " + key, "User-Agent": UA,
+                     "Accept": "application/json"})
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read().decode())
+        ids = [item.get("id") for item in payload.get("data", []) if item.get("id")]
+        return ids[0] if ids else ""
+    except Exception:                        # noqa: BLE001 - discovery is optional
+        return ""
+
+
+def llm_chat(system, user, max_tokens=900, model=None):
+    """One call across the configured provider chain."""
+    chain = _provider_chain()
+    if not chain:
+        print("  [llm] no provider configured (run: dream --set-key <key> --provider groq)",
+              flush=True)
+        return ""
+    for name, base, configured_model, key in chain:
+        candidates = [model or configured_model]
         for attempt, delay in enumerate((0, 4), start=1):
             if delay:
                 time.sleep(delay)
-            body = {"model": candidate,
-                    "messages": [{"role": "system", "content": system},
-                                 {"role": "user", "content": user}],
-                    "temperature": 0, "max_tokens": max_tokens}
-            try:
-                with urllib.request.urlopen(_request(base, key, body), timeout=60) as response:
-                    payload = json.loads(response.read().decode())
-                text = payload["choices"][0]["message"].get("content") or ""
-                if text.strip():
-                    return text
-            except Exception as error:       # noqa: BLE001 - next attempt / next model
-                print(f"  [llm error] {candidate} try{attempt}: "
-                      f"{type(error).__name__}: {str(error)[:120]}", flush=True)
-                time.sleep(2)
+            for candidate in list(candidates):
+                body = {"model": candidate,
+                        "messages": [{"role": "system", "content": system},
+                                     {"role": "user", "content": user}],
+                        "temperature": 0, "max_tokens": max_tokens}
+                try:
+                    with urllib.request.urlopen(_request(base, key, body),
+                                                timeout=60) as response:
+                        payload = json.loads(response.read().decode())
+                    text = payload["choices"][0]["message"].get("content") or ""
+                    if text.strip():
+                        return text
+                except urllib.error.HTTPError as error:
+                    print(f"  [llm error] {name}/{candidate} try{attempt}: HTTP {error.code}",
+                          flush=True)
+                    if error.code in (400, 404):
+                        discovered = _discover_model(base, key)
+                        if discovered and discovered not in candidates:
+                            candidates.append(discovered)
+                except Exception as error:   # noqa: BLE001 - retry, then next provider
+                    print(f"  [llm error] {name}/{candidate} try{attempt}: "
+                          f"{type(error).__name__}", flush=True)
     return ""
 
 

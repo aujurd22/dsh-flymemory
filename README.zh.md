@@ -302,6 +302,17 @@ node bin/flymemory.mjs version      # 本机这版 vs npm 上最新
 （在该端点 2026-10-31 实测：约 13 秒返回干净 JSON；GLM-5.3-Flash 约 27 秒、MiMo 61 秒、
 DeepSeek-V4.1-Flash 常返回 429）。没有 key 时命令直接退出，什么都不动。
 
+提供方可以叠加，一家一条命令：
+
+    dsh-flymemory dream --set-key <key> --provider groq      # 30 RPM / 1000 次/天，最快
+    dsh-flymemory dream --set-key <key> --provider cerebras  # 日额度最高
+    dsh-flymemory dream --set-key <key> --provider nvidia    # 40 RPM，不用绑卡
+    dsh-flymemory dream --set-key <key> --provider amd       # 免费但拥挤
+
+端点注册表在 `python/dream.py` 的 `PROVIDERS` 里；某家改了模型名时，会去问那家的
+`/models` 再试一次，所以名字过期是降级而不是失败。key 存在 `<dataDir>/dream.json`，
+不进包、不进 git。
+
 **注入按字符预算，不按条数。** 同一批数据上的 k 扫描（top-5 40.0%、top-10 44.2%、
 top-20 49.2%、top-50 56.7%）显示：分数随「有多少历史到达 reader」单调上升。所以钩子改成
 向服务端要 `flymemory_recall_block`：按相似度取最好的若干条**全文**，填到一个字符预算

@@ -348,8 +348,19 @@ dropped if unsupported, so the pass cannot invent history. It needs an
 OpenAI-compatible key in `FLYMEMORY_DREAM_API_KEY` (or `AMDRADEON_API_KEY`); the
 default endpoint is AMD's free one and the default model is `Qwen3.8-Flash-Next`
 -- measured on that endpoint 2026-10-31: clean JSON in ~13s, where GLM-5.3-Flash
-takes ~27s, MiMo 61s, and DeepSeek-V4.1-Flash answers 429 under load. Without a key
-the command exits without touching anything.
+takes ~27s, MiMo 61s, and DeepSeek-V4.1-Flash answers 429 under load. Without a key the command exits without touching anything.
+
+Providers are additive, so a chain is one command each:
+
+    dsh-flymemory dream --set-key <key> --provider groq      # 30 RPM / 1,000 RPD, fastest
+    dsh-flymemory dream --set-key <key> --provider cerebras  # highest daily allowance
+    dsh-flymemory dream --set-key <key> --provider nvidia    # 40 RPM, no credit card
+    dsh-flymemory dream --set-key <key> --provider amd       # free but congested
+
+Known endpoints live in `PROVIDERS` inside `python/dream.py`; if a provider
+renames a model, the pass asks that provider's `/models` and retries once, so a
+stale name degrades instead of failing. Keys land in `<dataDir>/dream.json`, never
+in the package.
 
 **Injection is a character budget, not an entry count.** A k-sweep on the same
 data (top-5 40.0%, top-10 44.2%, top-20 49.2%, top-50 56.7%) showed the score is

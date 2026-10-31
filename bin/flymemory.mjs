@@ -337,11 +337,22 @@ async function versionCommand() {
 
 /** Idle-time consolidation ("dreaming"), delegated to python/dream.py. */
 function dream() {
+  const secretFile = join(info.dataDir, 'dream.json')
   const keyValue = flag('--set-key')
   if (keyValue) {
-    const file = join(info.dataDir, 'dream.json')
-    writeFileSync(file, JSON.stringify({ apiKey: String(keyValue) }, null, 2) + '\n', { mode: 0o600 })
-    console.log(`dream: key stored in ${file} (local only, outside the package)`)
+    // Providers are additive: `--set-key <k> --provider groq` appends groq, so a
+    // later run can try several free endpoints in order.
+    const provider = String(flag('--provider') || 'amd')
+    let stored = { providers: [] }
+    if (existsSync(secretFile)) {
+      try { stored = JSON.parse(readFileSync(secretFile, 'utf8')) } catch { stored = { providers: [] } }
+    }
+    const providers = Array.isArray(stored.providers) ? stored.providers : []
+    const without = providers.filter((entry) => entry.provider !== provider)
+    without.push({ provider, apiKey: String(keyValue) })
+    writeFileSync(secretFile, JSON.stringify({ providers: without }, null, 2) + '\n', { mode: 0o600 })
+    console.log(`dream: ${provider} key stored in ${secretFile} (local only, outside the package)`)
+    console.log(`       chain now: ${without.map((entry) => entry.provider).join(' -> ')}`)
     return
   }
   const state = readState(info.dataDir)
@@ -351,18 +362,30 @@ function dream() {
     console.error(`dream: library not found: ${library}`)
     process.exit(1)
   }
-  const secretFile = join(info.dataDir, 'dream.json')
   const env = { ...process.env }
-  if (!env.FLYMEMORY_DREAM_API_KEY && !env.AMDRADEON_API_KEY && existsSync(secretFile)) {
+  const KEY_ENV = { amd: 'FLYMEMORY_DREAM_API_KEY', groq: 'GROQ_API_KEY', cerebras: 'CEREBRAS_API_KEY',
+    nvidia: 'NVIDIA_API_KEY', openrouter: 'OPENROUTER_API_KEY', pollinations: 'POLLINATIONS_API_KEY' }
+  if (existsSync(secretFile)) {
     try {
       const stored = JSON.parse(readFileSync(secretFile, 'utf8'))
-      if (stored?.apiKey) env.FLYMEMORY_DREAM_API_KEY = String(stored.apiKey)
+      const providers = Array.isArray(stored.providers) ? stored.providers : []
+      const usable = []
+      for (const entry of providers) {
+        const envName = KEY_ENV[entry.provider]
+        if (!envName || !entry.apiKey) continue
+        if (!env[envName]) env[envName] = String(entry.apiKey)
+        usable.push(entry.provider)
+      }
+      if (usable.length && !env.FLYMEMORY_DREAM_PROVIDERS) {
+        env.FLYMEMORY_DREAM_PROVIDERS = usable.join(',')
+      }
     } catch { /* ignore a corrupt local secret file */ }
   }
-  if (!env.FLYMEMORY_DREAM_API_KEY && !env.AMDRADEON_API_KEY) {
-    console.error('dream: no key configured. Run `dsh-flymemory dream --set-key <key>` once,')
-    console.error('       or set FLYMEMORY_DREAM_API_KEY. The pass distils the recent window')
-    console.error('       with an LLM and audits every entry before storing it.')
+  if (!env.FLYMEMORY_DREAM_PROVIDERS
+      && !Object.values(KEY_ENV).some((name) => env[name])) {
+    console.error('dream: no key configured.')
+    console.error('  one-time: dsh-flymemory dream --set-key <key> --provider groq|amd|cerebras|nvidia')
+    console.error('  (providers are additive; the pass tries them in the order added)')
     process.exit(2)
   }
   const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'python', 'dream.py')
