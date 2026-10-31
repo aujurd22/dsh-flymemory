@@ -18,6 +18,7 @@ const PATTERNS = [
   [/rc-[0-9a-f]{32,}/i, 'AMD free-endpoint key'],
   [/user_[A-Za-z0-9]{32,}/, 'Command Code gateway key'],
   [/\bsk-[A-Za-z0-9_-]{20,}/, 'OpenAI/DeepSeek style key'],
+  [/gsk_[A-Za-z0-9]{20,}/, 'Groq key'],
   [/\b(?:ghp_|gho_|github_pat_)[A-Za-z0-9_]{20,}/, 'GitHub token'],
   [/\bglpat-[A-Za-z0-9_-]{20,}/, 'GitLab token'],
   [/\bnpm_[A-Za-z0-9]{20,}/, 'npm token'],

@@ -36,7 +36,7 @@ import urllib.request
 # configured model is rejected falls back to whatever /models reports.
 PROVIDERS = {
     "amd":        ("https://developer.amd.com.cn/radeon/api/v1", "Qwen3.8-Flash-Next"),
-    "groq":       ("https://api.groq.com/openai/v1", "openai/gpt-oss-20b"),
+    "groq":       ("https://api.groq.com/openai/v1", "qwen/qwen3.8-27b"),
     "cerebras":   ("https://api.cerebras.ai/v1", "gpt-oss-120b"),
     "nvidia":     ("https://integrate.api.nvidia.com/v1", "openai/gpt-oss-20b"),
     "openrouter": ("https://openrouter.ai/api/v1", "openai/gpt-oss-20b:free"),
@@ -62,8 +62,8 @@ DISTILL_SYSTEM = """You are the memory-consolidation module of a personal AI
 assistant. Given a recent conversation window, distill the DURABLE facts and
 decisions worth keeping long-term: preferences, numbers, names, dates,
 plans, outcomes, corrections. Write 1-6 short self-contained entries. Do NOT
-invent anything not present in the conversation. Reply with ONLY a JSON
-array of strings."""
+invent anything not present in the conversation. Write each entry in the
+language the source turns use. Reply with ONLY a JSON array of strings."""
 
 AUDIT_SYSTEM = """You are a strict factuality judge. Given SOURCE TURNS and a
 distilled MEMORY ENTRY, decide whether every claim in the entry is supported
@@ -230,6 +230,7 @@ _SECRET_PATTERNS = (
     re.compile(r"rc-[0-9a-f]{32,}", re.I),
     re.compile(r"user_[A-Za-z0-9]{32,}"),
     re.compile(r"\bsk-[A-Za-z0-9_-]{20,}"),
+    re.compile(r"gsk_[A-Za-z0-9]{20,}"),
     re.compile(r"\b(?:ghp_|glpat-|npm_|hf_|AIza|xox[abp]-)"),
 )
 
@@ -286,8 +287,10 @@ def main():
     parser.add_argument("--compartment", default="")
     args = parser.parse_args()
 
-    if not api_key():
-        print("dream: FLYMEMORY_DREAM_API_KEY is not set -- nothing to do", flush=True)
+    if not _provider_chain():
+        print("dream: no provider key is available (set GROQ_API_KEY / "
+              "FLYMEMORY_DREAM_API_KEY, or run: dream --set-key <key> --provider <name>)",
+              flush=True)
         return 0
     if not os.path.exists(args.db):
         print(f"dream: library not found: {args.db}", flush=True)

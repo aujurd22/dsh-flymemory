@@ -365,6 +365,17 @@ function dream() {
   const env = { ...process.env }
   const KEY_ENV = { amd: 'FLYMEMORY_DREAM_API_KEY', groq: 'GROQ_API_KEY', cerebras: 'CEREBRAS_API_KEY',
     nvidia: 'NVIDIA_API_KEY', openrouter: 'OPENROUTER_API_KEY', pollinations: 'POLLINATIONS_API_KEY' }
+  // Keys live in one place: the harness credentials file. dream.json only decides
+  // which providers to try, so a key is never duplicated into a second file.
+  const harnessCredentials = join(homedir(), '.dsh', '.credentials.yaml')
+  if (existsSync(harnessCredentials)) {
+    try {
+      for (const line of readFileSync(harnessCredentials, 'utf8').split('\n')) {
+        const match = line.match(/^\s*([A-Z0-9_]+):\s*(\S+)\s*$/)
+        if (match && !env[match[1]]) env[match[1]] = match[2]
+      }
+    } catch { /* unreadable credentials: fall back to the environment */ }
+  }
   if (existsSync(secretFile)) {
     try {
       const stored = JSON.parse(readFileSync(secretFile, 'utf8'))
@@ -372,8 +383,11 @@ function dream() {
       const usable = []
       for (const entry of providers) {
         const envName = KEY_ENV[entry.provider]
-        if (!envName || !entry.apiKey) continue
-        if (!env[envName]) env[envName] = String(entry.apiKey)
+        if (!envName) continue
+        // A provider may carry its key inline (dream.json) or rely on the harness
+        // credentials file; both land in env before this check.
+        if (entry.apiKey && !env[envName]) env[envName] = String(entry.apiKey)
+        if (!env[envName]) continue
         usable.push(entry.provider)
       }
       if (usable.length && !env.FLYMEMORY_DREAM_PROVIDERS) {
