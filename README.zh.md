@@ -295,6 +295,13 @@ node bin/flymemory.mjs version      # 本机这版 vs npm 上最新
 `include_parents`；答案那一半是一段很短的提示：遇到计数/排序/比较类问题，先把事实逐条
 抄出来，再计算。`answerProtocol: false` 可关掉。
 
+**做梦（空闲整理）。** `dsh-flymemory dream [--window 90] [--min-turns 6] [--dry-run]`
+把最近窗口蒸馏成长期条目，经运行中的服务写入。每条写入前都会先做一次忠实性审计，
+通不过的直接丢弃——所以这个动作不会凭空编造历史。需要 `FLYMEMORY_DREAM_API_KEY`
+（或 `AMDRADEON_API_KEY`）；默认端点走 AMD 免费服务，默认模型 `Qwen3.8-Flash-Next`
+（在该端点 2026-10-31 实测：约 13 秒返回干净 JSON；GLM-5.3-Flash 约 27 秒、MiMo 61 秒、
+DeepSeek-V4.1-Flash 常返回 429）。没有 key 时命令直接退出，什么都不动。
+
 **注入按字符预算，不按条数。** 同一批数据上的 k 扫描（top-5 40.0%、top-10 44.2%、
 top-20 49.2%、top-50 56.7%）显示：分数随「有多少历史到达 reader」单调上升。所以钩子改成
 向服务端要 `flymemory_recall_block`：按相似度取最好的若干条**全文**，填到一个字符预算

@@ -12,9 +12,11 @@
  * The CLI never needs DSH to be running; the plugin starts the same service by
  * itself when the harness boots.
  */
+import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import {
   PACKAGE_NAME,
@@ -333,7 +335,32 @@ async function versionCommand() {
   process.exit(0)
 }
 
-const commands = { status, start, stop, log: logCommand, doctor, mute, unmute: mute, ledger, version: versionCommand }
+/** Idle-time consolidation ("dreaming"), delegated to python/dream.py. */
+function dream() {
+  const state = readState(info.dataDir)
+  const endpoint = state?.endpoint || readEffectiveEndpoint(info.dataDir) || info.url
+  const library = state?.libraryPath || info.libraryPath
+  if (!existsSync(library)) {
+    console.error(`dream: library not found: ${library}`)
+    process.exit(1)
+  }
+  if (!process.env.FLYMEMORY_DREAM_API_KEY && !process.env.AMDRADEON_API_KEY) {
+    console.error('dream: set FLYMEMORY_DREAM_API_KEY (or AMDRADEON_API_KEY) first.')
+    console.error('       The pass distils the recent window with an LLM and audits every entry.')
+    process.exit(2)
+  }
+  const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'python', 'dream.py')
+  const args = [script, '--db', library, '--url', endpoint]
+  for (const name of ['--window', '--min-turns', '--compartment', '--model']) {
+    const value = flag(name)
+    if (value !== undefined) args.push(name, value)
+  }
+  if (has('--dry-run')) args.push('--dry-run')
+  const child = spawnSync(info.pythonExe || 'python', args, { stdio: 'inherit' })
+  process.exit(child.status ?? 1)
+}
+
+const commands = { status, start, stop, log: logCommand, doctor, mute, unmute: mute, ledger, version: versionCommand, dream }
 const run = commands[command]
 if (!run) {
   console.error(`unknown command "${command}"\n\nusage: dsh-flymemory [status|start|stop|log|doctor|mute|ledger|version] [--port N] [--data-dir DIR] [--python PATH]`)

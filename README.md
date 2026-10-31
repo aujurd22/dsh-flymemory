@@ -341,6 +341,16 @@ either half alone). The block comes from `flymemory_recall_block` with
 counting / ordering / comparison questions, copy the facts out verbatim first,
 then compute. `answerProtocol: false` removes that section.
 
+**Dreaming (idle consolidation).** `dsh-flymemory dream [--window 90] [--min-turns 6]
+[--dry-run]` distils the recent window into durable entries and stores them through
+the running service. Every entry is judged against the source turns first and
+dropped if unsupported, so the pass cannot invent history. It needs an
+OpenAI-compatible key in `FLYMEMORY_DREAM_API_KEY` (or `AMDRADEON_API_KEY`); the
+default endpoint is AMD's free one and the default model is `Qwen3.8-Flash-Next`
+-- measured on that endpoint 2026-10-31: clean JSON in ~13s, where GLM-5.3-Flash
+takes ~27s, MiMo 61s, and DeepSeek-V4.1-Flash answers 429 under load. Without a key
+the command exits without touching anything.
+
 **Injection is a character budget, not an entry count.** A k-sweep on the same
 data (top-5 40.0%, top-10 44.2%, top-20 49.2%, top-50 56.7%) showed the score is
 monotone in how much history reaches the reader, so the hook now asks the service

@@ -147,7 +147,9 @@ def build_store(record, granularity="sentence"):
                 memory.remember(text=f"[{date_text}] {role}: {content}",
                                 source="import", timestamp=stamp)
                 continue
+            chunk_log = []
             for chunk in split_chunks(f"[{date_text}] {role}: {content}"):
+                chunk_log.append(chunk)
                 memory.remember(text=chunk, source="import", timestamp=stamp)
     return memory
 
@@ -328,10 +330,13 @@ def build_store_indexed(record):
     memory = SmartMemory(n_bits=4096, decay_tau=2592000.0)
     id_to_session = {}
     session_texts = {}
+    session_chunks = {}
+    chunk_log = []
     for index, (date_text, session) in enumerate(zip(record.get("haystack_dates", []),
                                                      record.get("haystack_sessions", []))):
         stamp = parse_date(date_text)
         parts = []
+        chunk_log = []
         for turn in session:
             role = turn.get("role") or "user"
             content = (turn.get("content") or "").strip()
@@ -339,12 +344,14 @@ def build_store_indexed(record):
                 continue
             parts.append(f"{role}: {content}")
             for chunk in split_chunks(f"[{date_text}] {role}: {content}"):
+                chunk_log.append((stamp, chunk))
                 result = memory.remember(text=chunk, source="import", timestamp=stamp)
                 memory_id = result.get("memory_id")
                 if memory_id is not None:
                     id_to_session[memory_id] = index
         session_texts[index] = (date_text, "\n".join(parts))
-    return memory, id_to_session, session_texts
+        session_chunks[index] = chunk_log
+    return memory, id_to_session, session_texts, session_chunks
 
 
 # Gate validated offline on the 500 oracle questions (no LLM, no embeddings):
@@ -397,10 +404,12 @@ def ask_extract(model, question, record, context):
 
 
 def twolevel_context(record, question, budget_chars=6000, per_entry_chars=900,
-                     topk=25, parents=3, fine_share=0.6):
+                     topk=25, parents=3, fine_share=0.6, parent_max_entries=None):
     """The context that experiment B validated: sentence hits plus their sessions."""
     from recall_block import pack
-    store, id_to_session, session_texts = build_store_indexed(record)
+    built = build_store_indexed(record)
+    store, id_to_session, session_texts = built[0], built[1], built[2]
+    session_chunks = built[3] if len(built) > 3 else {}
     hits = store.recall(question, top_k=topk)
     fine_entries, parent_scores = [], {}
     for entry, sim, _score in hits:
@@ -418,10 +427,32 @@ def twolevel_context(record, question, budget_chars=6000, per_entry_chars=900,
         blocks = []
         for sid, _sim in chosen:
             date_text, body = session_texts[sid]
+            if parent_max_entries and session_chunks.get(sid):
+                chunks = session_chunks[sid]
+                center = chunks[0][0]
+                picked = sorted(chunks, key=lambda item: abs(item[0] - center))[:parent_max_entries]
+                picked.sort(key=lambda item: item[0])
+                body = "\n".join(chunk for _stamp, chunk in picked)
             blocks.append(f"[session {date_text}]\n{body[:1500]}")
         context += ("\n\nSessions those hits came from (wider context):\n"
                     + "\n\n".join(blocks))
     return context
+
+
+def run_twolevel_capped_extract(question, record, model, memory, budget_chars=6000,
+                                parent_max_entries=20):
+    """The production recipe: capped parent blocks + extract-then-compute."""
+    context = twolevel_context(record, question, budget_chars=budget_chars,
+                               parent_max_entries=parent_max_entries)
+    return ask_extract(model, question, record, context), 0
+
+
+def run_twolevel_capped(question, record, model, memory, budget_chars=6000,
+                        parent_max_entries=20):
+    """The two-level block with the production cap (20 entries per parent)."""
+    context = twolevel_context(record, question, budget_chars=budget_chars,
+                               parent_max_entries=parent_max_entries)
+    return ask_with_context(model, question, record, context), 0
 
 
 def run_twolevel_extract(question, record, model, memory, budget_chars=6000):
@@ -430,10 +461,9 @@ def run_twolevel_extract(question, record, model, memory, budget_chars=6000):
     return ask_extract(model, question, record, context), 0
 
 
-def run_twolevel(
-
-question, record, model, memory, budget_chars=6000,
-                 per_entry_chars=900, topk=25, parents=3, fine_share=0.6, gated=False):
+def run_twolevel(question, record, model, memory, budget_chars=6000,
+                 per_entry_chars=900, topk=25, parents=3, fine_share=0.6,
+                 gated=False, parent_max_entries=None):
     """Fine hits plus the sessions they came from -- additive, never a replacement.
 
     Measured reason for "additive": session-level ingestion alone lifted
@@ -442,7 +472,9 @@ question, record, model, memory, budget_chars=6000,
     So the parents ride alongside the sentence hits, on their own share.
     """
     from recall_block import pack
-    store, id_to_session, session_texts = build_store_indexed(record)
+    built = build_store_indexed(record)
+    store, id_to_session, session_texts = built[0], built[1], built[2]
+    session_chunks = built[3] if len(built) > 3 else {}
     hits = store.recall(question, top_k=topk)
     fine_entries, parent_scores = [], {}
     for entry, sim, _score in hits:
@@ -463,6 +495,12 @@ question, record, model, memory, budget_chars=6000,
         blocks = []
         for sid, _sim in chosen:
             date_text, body = session_texts[sid]
+            if parent_max_entries and session_chunks.get(sid):
+                chunks = session_chunks[sid]
+                center = chunks[0][0]
+                picked = sorted(chunks, key=lambda item: abs(item[0] - center))[:parent_max_entries]
+                picked.sort(key=lambda item: item[0])
+                body = "\n".join(chunk for _stamp, chunk in picked)
             blocks.append(f"[session {date_text}]\n{body[:1500]}")
         context += ("\n\nSessions those hits came from (wider context):\n"
                     + "\n\n".join(blocks))
@@ -487,7 +525,102 @@ question, record, model, memory, granularity="sentence",
     return answer, 0
 
 
+def _bm25_scores(docs, query, k1=1.5, b=0.75):
+    """Plain BM25 over tokenised documents (no dependencies)."""
+    import math, re
+    from collections import Counter
+    token = lambda s: re.findall(r"[a-z0-9']+", (s or "").lower())
+    tokenized = [token(d) for d in docs]
+    q = token(query)
+    n = len(tokenized) or 1
+    avgdl = sum(len(d) for d in tokenized) / n or 1.0
+    df = Counter()
+    for doc in tokenized:
+        for term in set(doc):
+            df[term] += 1
+    scores = []
+    for doc in tokenized:
+        tf = Counter(doc)
+        score = 0.0
+        for term in q:
+            if tf[term] == 0:
+                continue
+            idf = math.log(1 + (n - df[term] + 0.5) / (df[term] + 0.5))
+            score += idf * (tf[term] * (k1 + 1)) / (
+                tf[term] + k1 * (1 - b + b * len(doc) / avgdl))
+        scores.append(score)
+    return scores
+
+
+def bm25rec_context(record, question, topk=8, budget_chars=6000,
+                    per_entry_chars=900, recency_weight=0.35):
+    """BM25 x recency context (meow-memory's retrieval core), reusable."""
+    from recall_block import pack
+    docs, stamps = [], []
+    for date_text, session in zip(record.get("haystack_dates", []),
+                                  record.get("haystack_sessions", [])):
+        stamp = parse_date(date_text)
+        for turn in session:
+            content = (turn.get("content") or "").strip()
+            if content:
+                docs.append(f"[{date_text}] {turn.get('role') or 'user'}: {content}")
+                stamps.append(stamp)
+    if not docs:
+        return "(nothing retrieved)"
+    lexical = _bm25_scores(docs, question)
+    newest, oldest = max(stamps), min(stamps)
+    span = max(1.0, newest - oldest)
+    scored = sorted(((lex * (1 - recency_weight) + ((stamp - oldest) / span) * recency_weight, text)
+                     for text, stamp, lex in zip(docs, stamps, lexical)),
+                    key=lambda item: -item[0])
+    entries = [(f"[{index}]", text) for index, (_score, text) in enumerate(scored[:topk])]
+    block, _stats = pack(entries, budget_chars=budget_chars,
+                         per_entry_chars=per_entry_chars)
+    return "Memory (BM25 x recency):\n" + block
+
+
+def run_bm25rec_extract(question, record, model, memory):
+    """Lexical+recency retrieval stacked with extract-then-compute."""
+    context = bm25rec_context(record, question)
+    return ask_extract(model, question, record, context), 0
+
+
+def run_bm25rec(question, record, model, memory, topk=8, budget_chars=6000,
+                per_entry_chars=900, recency_weight=0.35):
+    """meow-memory's retrieval core: BM25 x recency weight, no embeddings.
+
+    Their published design is a seven-layer SQLite store searched by
+    "BM25 x recency weight"; this arm replicates the retrieval, not the plugins.
+    """
+    from recall_block import pack
+    docs, stamps = [], []
+    for date_text, session in zip(record.get("haystack_dates", []),
+                                  record.get("haystack_sessions", [])):
+        stamp = parse_date(date_text)
+        for turn in session:
+            content = (turn.get("content") or "").strip()
+            if content:
+                docs.append(f"[{date_text}] {turn.get('role') or 'user'}: {content}")
+                stamps.append(stamp)
+    if not docs:
+        return ask_with_context(model, question, record, "(nothing retrieved)"), 0
+    lexical = _bm25_scores(docs, question)
+    newest, oldest = max(stamps), min(stamps)
+    span = max(1.0, newest - oldest)
+    scored = []
+    for text, stamp, lex in zip(docs, stamps, lexical):
+        recency = (stamp - oldest) / span
+        scored.append((lex * (1 - recency_weight) + recency * recency_weight, text))
+    scored.sort(key=lambda item: -item[0])
+    entries = [(f"[{index}]", text) for index, (_score, text) in enumerate(scored[:topk])]
+    block, _stats = pack(entries, budget_chars=budget_chars,
+                         per_entry_chars=per_entry_chars)
+    return ask_with_context(model, question, record,
+                            "Memory (BM25 x recency):\n" + block), 0
+
+
 def run_budget(
+
 question, record, model, memory, budget_chars=6000,
                per_entry_chars=600, topk=25):
     """The injection shape the hook now uses: fill a character budget, best first."""
@@ -695,7 +828,7 @@ def main():
     for index, record in enumerate(records, 1):
         question, truth = record["question"], record["answer"]
         qtype = record.get("question_type", "?")
-        needs_store = any(not arm.startswith("chunk-") and arm not in ("nomem", "fullctx", "mem0", "mem0infer", "twolevel", "twolevel-gate", "twolevel-extract") for arm in cells)
+        needs_store = any(not arm.startswith("chunk-") and arm not in ("nomem", "fullctx", "mem0", "mem0infer", "twolevel", "twolevel-gate", "twolevel-extract", "twolevel-capped", "twolevel-capped-extract", "bm25rec", "bm25rec-extract") for arm in cells)
         memory = build_store(record) if needs_store else None
         print(f"[{index}/{len(records)}] {qtype}: {question[:70]}", flush=True)
         for arm in cells:
@@ -713,6 +846,15 @@ def main():
                 answer, rounds = run_mem0_infer(question, record, clients[arm], memory)
             elif arm == "mem0":
                 answer, rounds = run_mem0(question, record, clients[arm], memory)
+            elif arm == "bm25rec-extract":
+                answer, rounds = run_bm25rec_extract(question, record, clients[arm], memory)
+            elif arm == "bm25rec":
+                answer, rounds = run_bm25rec(question, record, clients[arm], memory)
+            elif arm == "twolevel-capped-extract":
+                answer, rounds = run_twolevel_capped_extract(question, record,
+                                                             clients[arm], memory)
+            elif arm == "twolevel-capped":
+                answer, rounds = run_twolevel_capped(question, record, clients[arm], memory)
             elif arm == "twolevel-extract":
                 answer, rounds = run_twolevel_extract(question, record, clients[arm], memory)
             elif arm == "twolevel-gate":
