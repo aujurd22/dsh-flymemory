@@ -13,7 +13,7 @@
  * itself when the harness boots.
  */
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -337,6 +337,13 @@ async function versionCommand() {
 
 /** Idle-time consolidation ("dreaming"), delegated to python/dream.py. */
 function dream() {
+  const keyValue = flag('--set-key')
+  if (keyValue) {
+    const file = join(info.dataDir, 'dream.json')
+    writeFileSync(file, JSON.stringify({ apiKey: String(keyValue) }, null, 2) + '\n', { mode: 0o600 })
+    console.log(`dream: key stored in ${file} (local only, outside the package)`)
+    return
+  }
   const state = readState(info.dataDir)
   const endpoint = state?.endpoint || readEffectiveEndpoint(info.dataDir) || info.url
   const library = state?.libraryPath || info.libraryPath
@@ -344,9 +351,18 @@ function dream() {
     console.error(`dream: library not found: ${library}`)
     process.exit(1)
   }
-  if (!process.env.FLYMEMORY_DREAM_API_KEY && !process.env.AMDRADEON_API_KEY) {
-    console.error('dream: set FLYMEMORY_DREAM_API_KEY (or AMDRADEON_API_KEY) first.')
-    console.error('       The pass distils the recent window with an LLM and audits every entry.')
+  const secretFile = join(info.dataDir, 'dream.json')
+  const env = { ...process.env }
+  if (!env.FLYMEMORY_DREAM_API_KEY && !env.AMDRADEON_API_KEY && existsSync(secretFile)) {
+    try {
+      const stored = JSON.parse(readFileSync(secretFile, 'utf8'))
+      if (stored?.apiKey) env.FLYMEMORY_DREAM_API_KEY = String(stored.apiKey)
+    } catch { /* ignore a corrupt local secret file */ }
+  }
+  if (!env.FLYMEMORY_DREAM_API_KEY && !env.AMDRADEON_API_KEY) {
+    console.error('dream: no key configured. Run `dsh-flymemory dream --set-key <key>` once,')
+    console.error('       or set FLYMEMORY_DREAM_API_KEY. The pass distils the recent window')
+    console.error('       with an LLM and audits every entry before storing it.')
     process.exit(2)
   }
   const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'python', 'dream.py')
@@ -356,7 +372,7 @@ function dream() {
     if (value !== undefined) args.push(name, value)
   }
   if (has('--dry-run')) args.push('--dry-run')
-  const child = spawnSync(info.pythonExe || 'python', args, { stdio: 'inherit' })
+  const child = spawnSync(info.pythonExe || 'python', args, { stdio: 'inherit', env })
   process.exit(child.status ?? 1)
 }
 

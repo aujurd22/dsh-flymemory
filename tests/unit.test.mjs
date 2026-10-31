@@ -375,6 +375,14 @@ describe('native recall/capture hooks', () => {
     assert.equal(isSkippableText('AUTOMATION-DISPATCH: heartbeat'), true)
     assert.equal(isSkippableText('Continue working toward the active session goal'), true)
     assert.equal(isSkippableText('token ghp_abcdefghijklmnop'), true)
+  // Free-endpoint keys that reached the store on 2026-10-31: a substring list
+  // could not catch them, so the patterns exist.
+  assert.equal(isSkippableText('key rc-0123456789abcdef0123456789abcdef0123456789abcdef'), true)
+  assert.equal(isSkippableText('user_FAKEkey000000000000000000000000000000000000000000000000000000'), true)
+  assert.equal(isSkippableText('sk-FAKEkey00000000000000000000'), true)
+  // ... but ordinary prose that merely contains those letters is still captured.
+  assert.equal(isSkippableText('mask-mixing curriculum 里的 sk- 不是密钥'), false)
+  assert.equal(isSkippableText('src-env 配置文件在项目根目录'), false)
     assert.equal(isSkippableText('-----BEGIN PRIVATE KEY-----'), true)
     assert.equal(isSkippableText('ordinary user question'), false)
     assert.equal(

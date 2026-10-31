@@ -23,6 +23,7 @@ source turns, and unsupported entries are dropped rather than stored.
 """
 import argparse
 import json
+import re
 import os
 import sys
 import time
@@ -87,7 +88,7 @@ def llm_chat(system, user, max_tokens=900, model=None):
     chain = [chosen] + [m for m in FALLBACK_MODELS if m != chosen]
 
     for candidate in chain:
-        for attempt, delay in enumerate((0, 3, 8), start=1):
+        for attempt, delay in enumerate((0, 4), start=1):
             if delay:
                 time.sleep(delay)
             body = {"model": candidate,
@@ -95,7 +96,7 @@ def llm_chat(system, user, max_tokens=900, model=None):
                                  {"role": "user", "content": user}],
                     "temperature": 0, "max_tokens": max_tokens}
             try:
-                with urllib.request.urlopen(_request(base, key, body), timeout=180) as response:
+                with urllib.request.urlopen(_request(base, key, body), timeout=60) as response:
                     payload = json.loads(response.read().decode())
                 text = payload["choices"][0]["message"].get("content") or ""
                 if text.strip():
@@ -167,6 +168,19 @@ def parse_decision(raw):
     return {}, "unparseable"
 
 
+_SECRET_PATTERNS = (
+    re.compile(r"rc-[0-9a-f]{32,}", re.I),
+    re.compile(r"user_[A-Za-z0-9]{32,}"),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{20,}"),
+    re.compile(r"\b(?:ghp_|glpat-|npm_|hf_|AIza|xox[abp]-)"),
+)
+
+
+def _looks_like_credential(text):
+    """Never distil a secret into the library (2026-10-31: a key was distilled)."""
+    return any(pattern.search(text or "") for pattern in _SECRET_PATTERNS)
+
+
 def distill(turns, chunk_chars=3000):
     """Distil the window in small chunks: big single requests are what 502'd."""
     blocks, current, size = [], [], 0
@@ -180,7 +194,9 @@ def distill(turns, chunk_chars=3000):
         blocks.append("\n".join(current))
 
     entries, errors = [], []
-    for block in blocks:
+    for index, block in enumerate(blocks, 1):
+        print("  [distil] chunk %d/%d (%d chars)" % (index, len(blocks), len(block)),
+              flush=True)
         raw = llm_chat(DISTILL_SYSTEM, block[:chunk_chars])
         chunk_entries, error = parse_array(_clean_json_text(raw))
         if error:
@@ -254,6 +270,9 @@ def main():
         print(f"  [{'KEEP' if supported else 'DROP'}] {entry[:80]}"
               + (f"  ({note})" if not supported else ""), flush=True)
         if not supported:
+            continue
+        if _looks_like_credential(entry):
+            print("  [SKIP] entry looks like a credential", flush=True)
             continue
         if args.dry_run:
             stored += 1
