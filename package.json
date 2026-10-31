@@ -1,6 +1,6 @@
 {
   "name": "dsh-flymemory",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Long-term memory for DeepSeek Harness: 16 FlyMemory MCP tools, automatic recall and capture hooks, and a supervised local engine.",
   "type": "module",
   "main": "lib/index.js",
