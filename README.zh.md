@@ -287,6 +287,10 @@ node bin/flymemory.mjs version      # 本机这版 vs npm 上最新
 | **两者合并（现在插件就是这么做的）** | **69.2%** | ~1,947 |
 | 把整段历史塞进一个 prompt | 76.7% | ~6,230 |
 
+父块来自 `flymemory_recall_block(include_parents=True)`：按 app + 活动窗口分组
+（`parent_window_s` 默认 300 秒，`parent_max_entries` 默认 20 条）。这是「会话」在生产
+环境里的替代品，比基准里的会话粒度更粗，所以 +13.4pp 是方向而不是承诺。
+
 两半各自都显著（配对 p=0.007 / p=0.001）。块来自 `flymemory_recall_block` 的
 `include_parents`；答案那一半是一段很短的提示：遇到计数/排序/比较类问题，先把事实逐条
 抄出来，再计算。`answerProtocol: false` 可关掉。

@@ -63,14 +63,14 @@ def group_by_batch(hits, window_s=2.0, parents=3):
     best = {}
     for hit in hits:
         entry, sim = hit[0], hit[1]
-        key = batch_key(getattr(entry, "app", "") or _app_tag(entry),
+        key = batch_key(getattr(entry, "app", "") or app_tag(entry),
                         entry.timestamp, window_s)
         if key not in best or sim > best[key]:
             best[key] = sim
     return sorted(best.items(), key=lambda item: -item[1])[:parents]
 
 
-def _app_tag(entry):
+def app_tag(entry):
     for tag in getattr(entry, "tags", []) or []:
         if isinstance(tag, str) and tag.startswith("app:"):
             return tag[4:]

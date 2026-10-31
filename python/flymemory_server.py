@@ -542,7 +542,9 @@ def flymemory_recall_index(query: str, top_k: int = 10,
 def flymemory_recall_block(query: str, budget_chars: int = 6000,
                            per_entry_chars: int = 600, top_k: int = 25,
                            include_parents: bool = True,
-                           parent_share: float = 0.4) -> str:
+                           parent_share: float = 0.4,
+                           parent_window_s: float = 300.0,
+                           parent_max_entries: int = 20) -> str:
     """Budget-aware recall, optionally with the capture batches the hits came from.
 
     Two measurements drive this shape:
@@ -557,7 +559,7 @@ def flymemory_recall_block(query: str, budget_chars: int = 6000,
 
     The first line carries the best similarity so a caller can gate weak matches.
     """
-    from recall_block import pack, group_by_batch
+    from recall_block import pack, group_by_batch, app_tag
     with _mem_lock:
         mem = get_memory()
         results = mem.recall(query, top_k=max(1, min(int(top_k), 50)))
@@ -574,16 +576,20 @@ def flymemory_recall_block(query: str, budget_chars: int = 6000,
                             per_entry_chars=per_entry_chars)
         parts = [f"top_sim={best:.2f}", block]
         if include_parents:
-            batches = group_by_batch([(e, s) for e, s, _ in results])
+            window = max(1.0, float(parent_window_s))
+            batches = group_by_batch([(e, s) for e, s, _ in results],
+                                    window_s=window)
             parent_budget = int(budget_chars * parent_share)
             for key, _sim in batches:
                 members = [m for m in mem.memories
                            if m.superseded_by is None
-                           and _app_of(m) == key[0]
-                           and int(m.timestamp // 2.0) == key[1]]
+                           and app_tag(m) == key[0]
+                           and int(m.timestamp // window) == key[1]]
                 if len(members) < 2:
                     continue
-                members.sort(key=lambda m: m.memory_id)
+                center = (key[1] + 0.5) * window
+                members.sort(key=lambda m: abs(m.timestamp - center))
+                members = members[:max(2, int(parent_max_entries))]
                 body = "\n".join(m.text for m in members)[:max(300, parent_budget // max(1, len(batches)))]
                 stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(members[0].timestamp))
                 parts.append(f"[capture batch {stamp} · {len(members)} entries]\n{body}")

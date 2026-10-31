@@ -329,6 +329,12 @@ then stacked, on LongMemEval with the reader held fixed (120 questions):
 | **both, which is what this plugin now does** | **69.2%** | ~1,947 |
 | the entire history in one prompt | 76.7% | ~6,230 |
 
+The parent blocks come from `flymemory_recall_block(include_parents=True)`, which
+groups entries by app and an activity window (`parent_window_s`, default 300s,
+capped at `parent_max_entries`, default 20). That is the production stand-in for
+the "session" the benchmark used; it is coarser, so the measured +13.4pp is a
+direction, not a promise for this store.
+
 Both halves are independently significant (paired p=0.007 and p=0.001 against
 either half alone). The block comes from `flymemory_recall_block` with
 `include_parents`; the answer half is a short prompt section that says: for
