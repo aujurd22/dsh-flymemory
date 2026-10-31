@@ -118,18 +118,37 @@ def parse_date(text):
     return datetime.datetime(year, month, day).timestamp()
 
 
-def build_store(record):
+def build_store(record, granularity="sentence"):
+    """Ingest one question's haystack at a chosen chunk granularity.
+
+    "sentence" is what the engine does today (split_chunks: one sentence per
+    entry). "turn" stores one entry per message, "session" one per session. The
+    Cartesia H-Net result and our own P-DIACT null both point at ingestion
+    granularity being a real variable, so measure it instead of assuming.
+    """
+    from flymemory.v3 import split_chunks
     memory = SmartMemory(n_bits=4096, decay_tau=2592000.0)
     for date_text, session in zip(record.get("haystack_dates", []),
                                   record.get("haystack_sessions", [])):
         stamp = parse_date(date_text)
+        if granularity == "session":
+            joined = "\n".join(f"{t.get('role') or 'user'}: {(t.get('content') or '').strip()}"
+                               for t in session if (t.get("content") or "").strip())
+            if joined.strip():
+                memory.remember(text=f"[{date_text}] {joined}", source="import",
+                                timestamp=stamp)
+            continue
         for turn in session:
             role = turn.get("role") or "user"
             content = (turn.get("content") or "").strip()
             if not content:
                 continue
-            memory.remember_text(text=f"[{date_text}] {role}: {content}",
-                                 source="import", timestamp=stamp)
+            if granularity == "turn":
+                memory.remember(text=f"[{date_text}] {role}: {content}",
+                                source="import", timestamp=stamp)
+                continue
+            for chunk in split_chunks(f"[{date_text}] {role}: {content}"):
+                memory.remember(text=chunk, source="import", timestamp=stamp)
     return memory
 
 
@@ -298,7 +317,178 @@ def run_extract(question, record, model, memory, budget_chars=6000,
     return answer, 1
 
 
-def run_budget(question, record, model, memory, budget_chars=6000,
+def build_store_indexed(record):
+    """Sentence-level store that also remembers which session each entry came from.
+
+    That mapping is what makes a two-level read possible without a schema change:
+    the fine entries are exactly today's store, and the session blocks are derived
+    on demand (a materialised view, rebuildable, never the source of truth).
+    """
+    from flymemory.v3 import split_chunks
+    memory = SmartMemory(n_bits=4096, decay_tau=2592000.0)
+    id_to_session = {}
+    session_texts = {}
+    for index, (date_text, session) in enumerate(zip(record.get("haystack_dates", []),
+                                                     record.get("haystack_sessions", []))):
+        stamp = parse_date(date_text)
+        parts = []
+        for turn in session:
+            role = turn.get("role") or "user"
+            content = (turn.get("content") or "").strip()
+            if not content:
+                continue
+            parts.append(f"{role}: {content}")
+            for chunk in split_chunks(f"[{date_text}] {role}: {content}"):
+                result = memory.remember(text=chunk, source="import", timestamp=stamp)
+                memory_id = result.get("memory_id")
+                if memory_id is not None:
+                    id_to_session[memory_id] = index
+        session_texts[index] = (date_text, "\n".join(parts))
+    return memory, id_to_session, session_texts
+
+
+# Gate validated offline on the 500 oracle questions (no LLM, no embeddings):
+# counting/ordering cues fire on 80% of temporal, 74% of multi-session and only
+# 19% of single-session-user questions -> precision 0.75, recall 0.77 at 54%
+# coverage. Dispersion of hits, tried first, was pure noise (AUC 0.479).
+AGGREGATION_CUES = re.compile(
+    r"\bhow many\b|\bhow long\b|\btotal\b|\bnumber of\b|\btimes\b|\baltogether\b"
+    r"|\bfirst\b|\blast\b|\bearliest\b|\blatest\b|\bbefore\b|\bafter\b|\border\b",
+    re.I)
+
+
+def wants_aggregation(question):
+    return bool(AGGREGATION_CUES.search(question or ""))
+
+
+def run_twolevel_gated(question, record, model, memory, budget_chars=6000,
+                       per_entry_chars=900, topk=25, parents=3, fine_share=0.6):
+    """Additive parents only when the question's form asks for a roll-up.
+
+    Costs the parent blocks on ~54% of questions instead of all of them; the other
+    half keeps the cheap sentence-only read, same store, one build.
+    """
+    return run_twolevel(question, record, model, memory,
+                        budget_chars=budget_chars,
+                        per_entry_chars=per_entry_chars, topk=topk,
+                        parents=parents, fine_share=fine_share, gated=True)
+
+
+def ask_extract(model, question, record, context):
+    """Two-step answer: extract facts verbatim, then compute the answer from them.
+
+    Upstream's P-ANSWER protocol (6% -> 16% strict); here it is applied to whatever
+    context a retrieval design produces.
+    """
+    facts = model.chat([
+        {"role": "system", "content":
+            "Extract every atomic fact relevant to the question from the context. "
+            "Copy numbers, dates and names VERBATIM, one fact per line. Do not "
+            "infer, do not summarise, do not answer the question yet."},
+        {"role": "user", "content": f"Context:\n{context[:14000]}\n\nQuestion: {question}"},
+    ], max_tokens=800)
+    return model.chat([
+        {"role": "system", "content":
+            "Answer using ONLY the fact list. If the answer needs a count or an "
+            "arithmetic step, compute it explicitly from the facts. One short sentence."},
+        {"role": "user", "content": f"Question: {question}\nQuestion date: "
+                                    f"{record['question_date']}\nFacts:\n{facts}"},
+    ], max_tokens=300)
+
+
+def twolevel_context(record, question, budget_chars=6000, per_entry_chars=900,
+                     topk=25, parents=3, fine_share=0.6):
+    """The context that experiment B validated: sentence hits plus their sessions."""
+    from recall_block import pack
+    store, id_to_session, session_texts = build_store_indexed(record)
+    hits = store.recall(question, top_k=topk)
+    fine_entries, parent_scores = [], {}
+    for entry, sim, _score in hits:
+        stamp = time.strftime("%Y-%m-%d", time.localtime(entry.timestamp))
+        fine_entries.append((f"[#{entry.memory_id} | {sim:.2f} | {stamp}]", entry.text))
+        sid = id_to_session.get(entry.memory_id)
+        if sid is not None and sid not in parent_scores:
+            parent_scores[sid] = sim
+    fine_block, _stats = pack(fine_entries,
+                              budget_chars=int(budget_chars * fine_share),
+                              per_entry_chars=per_entry_chars)
+    context = "Memory (sentence-level hits):\n" + fine_block
+    chosen = sorted(parent_scores.items(), key=lambda kv: -kv[1])[:parents]
+    if chosen:
+        blocks = []
+        for sid, _sim in chosen:
+            date_text, body = session_texts[sid]
+            blocks.append(f"[session {date_text}]\n{body[:1500]}")
+        context += ("\n\nSessions those hits came from (wider context):\n"
+                    + "\n\n".join(blocks))
+    return context
+
+
+def run_twolevel_extract(question, record, model, memory, budget_chars=6000):
+    """The two wins stacked: two-level injection + extract-then-compute answering."""
+    context = twolevel_context(record, question, budget_chars=budget_chars)
+    return ask_extract(model, question, record, context), 0
+
+
+def run_twolevel(
+
+question, record, model, memory, budget_chars=6000,
+                 per_entry_chars=900, topk=25, parents=3, fine_share=0.6, gated=False):
+    """Fine hits plus the sessions they came from -- additive, never a replacement.
+
+    Measured reason for "additive": session-level ingestion alone lifted
+    multi-session questions (+13pp) but destroyed single-session-user recall
+    (71% -> 14%), because a coarse block spends the budget on fewer entries.
+    So the parents ride alongside the sentence hits, on their own share.
+    """
+    from recall_block import pack
+    store, id_to_session, session_texts = build_store_indexed(record)
+    hits = store.recall(question, top_k=topk)
+    fine_entries, parent_scores = [], {}
+    for entry, sim, _score in hits:
+        stamp = time.strftime("%Y-%m-%d", time.localtime(entry.timestamp))
+        fine_entries.append((f"[#{entry.memory_id} | {sim:.2f} | {stamp}]", entry.text))
+        sid = id_to_session.get(entry.memory_id)
+        if sid is not None and sid not in parent_scores:
+            parent_scores[sid] = sim
+    fine_block, _stats = pack(fine_entries,
+                              budget_chars=int(budget_chars * fine_share),
+                              per_entry_chars=per_entry_chars)
+    context = "Memory (sentence-level hits):\n" + fine_block
+    if gated and not wants_aggregation(question):
+        parents = 0
+        fine_share = 1.0     # nothing to spend on parents: give the block to the hits
+    chosen = sorted(parent_scores.items(), key=lambda kv: -kv[1])[:parents]
+    if chosen:
+        blocks = []
+        for sid, _sim in chosen:
+            date_text, body = session_texts[sid]
+            blocks.append(f"[session {date_text}]\n{body[:1500]}")
+        context += ("\n\nSessions those hits came from (wider context):\n"
+                    + "\n\n".join(blocks))
+    return ask_with_context(model, question, record, context), 0
+
+
+def run_chunk(
+question, record, model, memory, granularity="sentence",
+              budget_chars=6000, per_entry_chars=900, topk=25):
+    """Answer with a budgeted block over a store ingested at one granularity."""
+    from recall_block import pack
+    store = build_store(record, granularity=granularity)
+    hits = store.recall(question, top_k=topk)
+    entries = []
+    for entry, sim, _score in hits:
+        stamp = time.strftime("%Y-%m-%d", time.localtime(entry.timestamp))
+        entries.append((f"[#{entry.memory_id} | {sim:.2f} | {stamp}]", entry.text))
+    block, _stats = pack(entries, budget_chars=budget_chars,
+                         per_entry_chars=per_entry_chars)
+    answer = ask_with_context(model, question, record,
+                              "Memory context (budget-aware):\n" + block)
+    return answer, 0
+
+
+def run_budget(
+question, record, model, memory, budget_chars=6000,
                per_entry_chars=600, topk=25):
     """The injection shape the hook now uses: fill a character budget, best first."""
     from recall_block import pack
@@ -505,7 +695,7 @@ def main():
     for index, record in enumerate(records, 1):
         question, truth = record["question"], record["answer"]
         qtype = record.get("question_type", "?")
-        needs_store = any(arm not in ("nomem", "fullctx", "mem0", "mem0infer") for arm in cells)
+        needs_store = any(not arm.startswith("chunk-") and arm not in ("nomem", "fullctx", "mem0", "mem0infer", "twolevel", "twolevel-gate", "twolevel-extract") for arm in cells)
         memory = build_store(record) if needs_store else None
         print(f"[{index}/{len(records)}] {qtype}: {question[:70]}", flush=True)
         for arm in cells:
@@ -523,6 +713,15 @@ def main():
                 answer, rounds = run_mem0_infer(question, record, clients[arm], memory)
             elif arm == "mem0":
                 answer, rounds = run_mem0(question, record, clients[arm], memory)
+            elif arm == "twolevel-extract":
+                answer, rounds = run_twolevel_extract(question, record, clients[arm], memory)
+            elif arm == "twolevel-gate":
+                answer, rounds = run_twolevel_gated(question, record, clients[arm], memory)
+            elif arm == "twolevel":
+                answer, rounds = run_twolevel(question, record, clients[arm], memory)
+            elif arm.startswith("chunk-"):
+                answer, rounds = run_chunk(question, record, clients[arm], memory,
+                                           granularity=arm.split("-", 1)[1])
             elif arm == "router":
                 answer, rounds = run_router(question, record, clients[arm], memory)
             elif arm == "extract":
@@ -553,8 +752,17 @@ def main():
                          "arm": name, "score": score, "rounds": rounds,
                          "answer": answer[:400]})
             print(f"    {name:18} {score:8} {answer[:60]!r}", flush=True)
+        if args.out:
+            json.dump({"model": model_id, "sample": args.sample, "seed": args.seed,
+                       "base_url": base, "elapsed_s": time.time() - started,
+                       "stats": stats, "rows": rows},
+                      open(args.out, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 
     elapsed = time.time() - started
+    if args.out:   # incremental: an interrupted run still leaves usable data
+        json.dump({"model": model_id, "sample": args.sample, "seed": args.seed,
+                   "base_url": base, "elapsed_s": elapsed, "stats": stats, "rows": rows},
+                  open(args.out, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
     print("\n=== results ===")
     strict = {}
     for name, row in stats.items():

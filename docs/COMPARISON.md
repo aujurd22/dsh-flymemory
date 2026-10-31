@@ -97,10 +97,62 @@ permanently poison it.
 Caveat: n=40 on a single split; the mem0 range is wide enough that this is
 directional, not a ranking.
 
+## Stacking two independent fixes: 69.2%
+
+Two changes were measured separately, then together, on the same 120 questions:
+
+| arm | strict | weighted | prompt tokens/answer |
+|---|---|---|---|
+| RAG top-20 (baseline) | 50.8% | 54.6% | ~545 |
+| two-level injection (sentence hits + their sessions) | 57.5% | 60.4% | ~1,728 |
+| extract-then-compute answering | 56.7% | 60.4% | ~1,272 |
+| **both together** | **69.2%** | **71.2%** | ~1,947 |
+
+Paired, exact McNemar: combined vs two-level **+19/-5, p=0.007**; combined vs
+extract **+18/-3, p=0.001**. Neither component alone gets past 58%; together they
+clear 69%, and the two are *independent* -- one changes what reaches the reader
+(fine hits plus the sessions they came from), the other changes how the reader
+answers (copy the facts verbatim first, then compute).
+
+By type: multi-session 33/43 (77%), temporal-reasoning 15/24, single-session-user
+14/16, single-session-assistant 12/16, knowledge-update 8/15, preference 1/6.
+
+For scale: full context on these same questions scored 76.7% at ~6,230 tokens per
+answer. The stacked protocol reaches **69.2% at ~1,947** -- 7.5 points below the
+"unreadable-everything" ceiling for a third of the cost, with a single call and no
+tool loop.
+
+### Why each half works
+
+- **Two-level injection.** Ingesting whole sessions alone lifted multi-session
+  questions but destroyed single-session recall (71% -> 14%), because a coarse
+  block spends the budget on fewer entries. Adding the sessions *alongside*
+  sentence hits, on their own 40% of the budget, keeps both: aggregation +13.4pp
+  and single-session -1.9pp.
+- **Extract-then-compute.** Counting and ordering questions fail on arithmetic over
+  scattered evidence; copying the facts out first and then computing lifts
+  knowledge-update and single-session-user. It is upstream's P-ANSWER protocol and
+  it stacks cleanly because it touches the answer, not the retrieval.
+
+### What did not work
+
+- **Routing by question type** (an oracle router reading `question_type`): 53.3%,
+  below both components -- the problem was never "should I read more", it was
+  "what reaches the reader and how is it used".
+- **Gating the parent blocks** with a lexical count/order signal: 54.2% vs 55.8%
+  ungated (p=0.688) for 13% fewer tokens. The gate is correct but not worth the
+  complexity; the value is in looking at both levels, not in choosing one.
+- **A cheap "profile block"** for preference questions: exactly RAG (37.5%,
+  p=1.000). Preference questions still fail everywhere (0-17%).
+
+## What this supports, and what it does not
 ## What this supports, and what it does not
 
 Supported:
 
+0. **A stacked protocol reaches 69.2%** at ~1.9k tokens per answer, 7.5 points
+   under the full-context ceiling for a third of its cost (both components
+   individually significant, p<0.01).
 1. **A simple retrieval baseline is beaten decisively** by the tool protocol:
    40.6% → 54.8% at n=500, p<0.0001, with the gain concentrated in temporal and
    multi-session questions.
