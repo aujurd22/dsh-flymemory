@@ -318,6 +318,23 @@ After installing the bundle, the same CLI is linked into the profile at
 
 They're on by default, because automatic memory is the whole point of the thing.
 
+**The recipe, and what it is worth.** Two changes were measured separately and
+then stacked, on LongMemEval with the reader held fixed (120 questions):
+
+| what | strict | prompt tokens / answer |
+|---|---|---|
+| RAG top-20 | 50.8% | ~545 |
+| two-level block (sentence hits + the capture batches they came from) | 57.5% | ~1,728 |
+| extract-then-compute answering | 56.7% | ~1,272 |
+| **both, which is what this plugin now does** | **69.2%** | ~1,947 |
+| the entire history in one prompt | 76.7% | ~6,230 |
+
+Both halves are independently significant (paired p=0.007 and p=0.001 against
+either half alone). The block comes from `flymemory_recall_block` with
+`include_parents`; the answer half is a short prompt section that says: for
+counting / ordering / comparison questions, copy the facts out verbatim first,
+then compute. `answerProtocol: false` removes that section.
+
 **Injection is a character budget, not an entry count.** A k-sweep on the same
 data (top-5 40.0%, top-10 44.2%, top-20 49.2%, top-50 56.7%) showed the score is
 monotone in how much history reaches the reader, so the hook now asks the service

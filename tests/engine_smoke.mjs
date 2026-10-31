@@ -185,6 +185,15 @@ try {
   })
   check(block.startsWith('top_sim='), 'flymemory_recall_block reports the best similarity', block.split('\n')[0])
   check(block.includes('[memory block:'), 'flymemory_recall_block returns a packed block', (block.split('\n')[1] ?? '').slice(0, 60))
+  // Two-level recall: entries captured together come back as a parent block too.
+  await callTool('flymemory_remember', {
+    text: 'batch probe one. batch probe two. batch probe three.',
+    app: 'dsh',
+  })
+  const twoLevel = await callTool('flymemory_recall_block', {
+    query: 'batch probe', budget_chars: 3000, include_parents: true,
+  })
+  check(twoLevel.includes('capture batch'), 'recall_block adds the capture batch', twoLevel.split('\n').slice(2, 3).join('').slice(0, 60))
   if (created.length > 0) {
     const full = await callTool('flymemory_get_memory', { memory_id: created[created.length - 1] })
     check(full.includes('smoke probe'), 'flymemory_get_memory returned the full text')
