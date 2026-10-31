@@ -29,6 +29,9 @@ jobs:
         run: |
           node --check lib/index.js
           node --check bin/flymemory.mjs
+      - name: No credentials in the tree
+        run: node scripts/scan-secrets.mjs
+
       - name: Unit tests
         run: node tests/run.mjs
       - name: Bundle manifest is installable

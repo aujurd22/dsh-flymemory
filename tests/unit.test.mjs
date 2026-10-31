@@ -383,8 +383,8 @@ describe('native recall/capture hooks', () => {
   // ... but ordinary prose that merely contains those letters is still captured.
   assert.equal(isSkippableText('mask-mixing curriculum 里的 sk- 不是密钥'), false)
   assert.equal(isSkippableText('src-env 配置文件在项目根目录'), false)
-    assert.equal(isSkippableText('-----BEGIN PRIVATE KEY-----'), true)
-    assert.equal(isSkippableText('ordinary user question'), false)
+  assert.equal(isSkippableText('-----BEGIN PRIVATE KEY-----'), true)
+  assert.equal(isSkippableText('ordinary user question'), false)
     assert.equal(
       userTextOf([userMessage('<system-reminder>ignored</system-reminder>'), userMessage('real question')]),
       'real question',
