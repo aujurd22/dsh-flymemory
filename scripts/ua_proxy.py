@@ -15,11 +15,15 @@ is never written anywhere.
 """
 import argparse
 import json
+import os
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 TARGET = "https://api.commandcode.ai/provider/v1"
+# Count what passes through so a competitor's indexing cost is visible.
+COUNTER = {"requests": 0, "prompt_tokens": 0, "completion_tokens": 0}
+COUNT_FILE = os.environ.get("UA_PROXY_COUNT_FILE", "")
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 
@@ -51,6 +55,16 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as error:           # noqa: BLE001
             data = json.dumps({"error": {"message": str(error)}}).encode()
             code = 502
+        try:
+            COUNTER["requests"] += 1
+            usage = json.loads(data or b"{}").get("usage") or {}
+            COUNTER["prompt_tokens"] += usage.get("prompt_tokens", 0)
+            COUNTER["completion_tokens"] += usage.get("completion_tokens", 0)
+            if COUNT_FILE:
+                with open(COUNT_FILE, "w", encoding="utf-8") as handle:
+                    json.dump(COUNTER, handle)
+        except Exception:
+            pass
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))

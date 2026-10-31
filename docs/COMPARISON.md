@@ -65,6 +65,38 @@ n=150:
 - the oracle-split advantage of full context **reverses** when history is long:
   76.7% -> 45.3%, while the tool protocol only moves 56.7% -> 52.0%.
 
+## mem0 with its extraction pipeline (n=40, metered)
+
+mem0's default `infer=True` runs an LLM over each ingested batch to extract facts.
+That is the mode its published numbers use, and it is the mode whose cost keeps
+most harnesses away. A local UA proxy (`scripts/ua_proxy.py`, needed because the
+gateway rejects SDK user agents) makes it runnable *and* meters what goes through:
+
+| run | strict | index-time cost |
+|---|---|---|
+| mem0 infer=True, run 1 | 55.0% | -- |
+| mem0 infer=True, run 2 | 65.0% | 1 LLM call, **14,636 prompt tokens per question** |
+| mem0 infer=False (raw store) | 47.5% | 0 |
+| our agentic 3 rounds | 57.5% | 0 index-time, ~3,040 prompt tokens per answer |
+
+Two things stand out.
+
+1. **The same 40 questions score 55.0% and 65.0% in two mem0 runs.** Its store is
+   built by LLM decisions, so what it extracts -- and therefore its score -- is
+   not reproducible run to run. Retrieval over raw text is.
+2. **Extraction buys mem0 roughly +7 to +17 points over its own raw mode, for
+   ~14.6k index-time tokens per question**, and lands in the same band as our
+   protocol, which pays nothing at ingest and ~3k tokens per answer instead.
+
+So the two designs trade *when* to spend. mem0 spends at write time and gets a
+cheaper read; this store spends at read time and keeps the raw record. For a local
+long-term memory the second trade is worth stating plainly: no extraction step
+means an LLM upgrade does not invalidate the library, and a bad extraction cannot
+permanently poison it.
+
+Caveat: n=40 on a single split; the mem0 range is wide enough that this is
+directional, not a ranking.
+
 ## What this supports, and what it does not
 
 Supported:
@@ -82,9 +114,10 @@ Supported:
 
 Not supported, and worth stating plainly:
 
-- "better than Mem0 / Zep / Letta". We have not run them; our arms are baselines
-  we built, not their systems. A honest claim needs their code on this harness,
-  which is the next experiment rather than a footnote.
+- "better than Mem0 / Zep / Letta". mem0 *has* now been run on this harness (both
+  modes), and the result is parity within noise -- not superiority. Zep, Letta,
+  cognee and the graph-based systems have not been run: they need an external
+  database or an LLM-built index, which is a different cost regime.
 - "state-of-the-art on LongMemEval". n=150 on the long split, one reader, one
   judge; the long-split lead over full context is directional, p=0.229.
 - any claim about preference questions: every arm scores 3–17% there. Synthesised
