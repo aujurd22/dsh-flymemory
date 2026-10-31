@@ -226,7 +226,7 @@ def main():
             low_conf = False
         if text.strip() and not low_conf:
             block = ("<flymemory>\n[flymemory 召回——每条带日期，时序冲突"
-                     "以日期新者为准]\n" + text[:1500] + "\n")
+                     "以日期新者为准]\n" + text[:8000] + "\n")
             if lesson_text.strip():
                 block += ("\n[lessons 教训通道——踩过的坑，先看再动手]\n"
                           + lesson_text[:800] + "\n")
