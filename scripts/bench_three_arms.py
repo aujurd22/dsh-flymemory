@@ -168,42 +168,46 @@ def run_rag(question, record, model, memory, topk=5):
     return ask_with_context(model, question, record, context), 0
 
 
-_MEM0 = {"instance": None, "dir": None}
+_MEM0 = {"instances": {}, "dir": None}
 
 
-def mem0_instance():
-    """One local mem0 store for the whole run, isolated per question by user_id.
+def mem0_instance(use_llm=False):
+    """A local mem0 store. `use_llm=True` runs mem0's real pipeline (fact extraction
+    per message batch) through the local UA proxy; False is its raw-store mode.
 
-    `infer=False` keeps it a pure store (no LLM extraction) so the comparison is
-    about retrieval, and the cost stays sane: mem0's default path calls an LLM per
-    message, which for 500 questions would be hundreds of thousands of calls.
+    The distinction matters: mem0's published numbers come from infer=True, but at
+    500 questions that mode costs an LLM call per message batch per question.
     """
-    if _MEM0["instance"] is not None:
-        return _MEM0["instance"]
+    key = "llm" if use_llm else "raw"
+    if _MEM0["instances"].get(key) is not None:
+        return _MEM0["instances"][key]
     import tempfile as _tempfile
-    # mem0 builds its LLM client even for infer=False; it is never called,
-    # so a placeholder key is enough and no request leaves the machine.
     os.environ.setdefault("OPENAI_API_KEY", "sk-placeholder-never-called")
     from mem0 import Memory
-    workdir = _tempfile.mkdtemp(prefix="mem0-lme-")
-    _MEM0["dir"] = workdir
+    if _MEM0["dir"] is None:
+        _MEM0["dir"] = _tempfile.mkdtemp(prefix="mem0-lme-")
     config = {
         "vector_store": {"provider": "qdrant",
-                         "config": {"path": workdir, "collection_name": "lme",
-                                    "on_disk": True, "embedding_model_dims": 384}},
+                         "config": {"path": _MEM0["dir"],
+                                    "collection_name": "lme_" + key,
+                                    "on_disk": True,
+                                    "embedding_model_dims": 384}},
         "embedder": {"provider": "huggingface",
                      "config": {"model": os.environ.get(
                          "MEM0_EMBEDDER",
                          "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")}},
     }
-    _MEM0["instance"] = Memory.from_config(config)
-    return _MEM0["instance"]
+    if use_llm:
+        config["llm"] = {"provider": "openai",
+                         "config": {"model": os.environ.get("CMMODEL",
+                                                            "deepseek/deepseek-v4.1-flash"),
+                                    "api_key": os.environ.get("CMKEY") or "sk-via-proxy",
+                                    "openai_base_url": "http://127.0.0.1:8799/v1"}}
+    _MEM0["instances"][key] = Memory.from_config(config)
+    return _MEM0["instances"][key]
 
 
-def run_mem0(question, record, model, memory, limit=5):
-    """The real thing, same reader and judge: mem0's own store and search."""
-    client = mem0_instance()
-    user_id = str(record.get("question_id"))
+def _mem0_turns(record):
     turns = []
     for date_text, session in zip(record.get("haystack_dates", []),
                                   record.get("haystack_sessions", [])):
@@ -212,8 +216,30 @@ def run_mem0(question, record, model, memory, limit=5):
             if content:
                 turns.append({"role": turn.get("role") or "user",
                               "content": f"[{date_text}] {content}"})
+    return turns
+
+
+def run_mem0_infer(question, record, model, memory, limit=5):
+    """mem0 with its default pipeline: an LLM extracts facts from each batch."""
+    client = mem0_instance(use_llm=True)
+    user_id = "inf-" + str(record.get("question_id"))
     try:
-        client.add(turns, user_id=user_id, infer=False)
+        client.add(_mem0_turns(record), user_id=user_id)   # infer=True by default
+        hits = client.search(question, filters={"user_id": user_id}, top_k=limit)
+    except Exception as error:                             # noqa: BLE001
+        return f"[mem0 infer error: {error}]", 0
+    results = hits.get("results", hits) if isinstance(hits, dict) else hits
+    texts = [hit.get("memory") or hit.get("text") or "" for hit in results]
+    context = "\n\n".join(t for t in texts if t) or "(nothing retrieved)"
+    return ask_with_context(model, question, record, context), 0
+
+
+def run_mem0(question, record, model, memory, limit=5):
+    """The real thing, same reader and judge: mem0's own store and search."""
+    client = mem0_instance(use_llm=False)
+    user_id = str(record.get("question_id"))
+    try:
+        client.add(_mem0_turns(record), user_id=user_id, infer=False)
         hits = client.search(question, filters={"user_id": user_id}, top_k=limit)
     except Exception as error:                      # noqa: BLE001
         return f"[mem0 error: {error}]", 0
@@ -221,6 +247,55 @@ def run_mem0(question, record, model, memory, limit=5):
     texts = [hit.get("memory") or hit.get("text") or "" for hit in results]
     context = "\n\n".join(t for t in texts if t) or "(nothing retrieved)"
     return ask_with_context(model, question, record, context), 0
+
+
+MULTI_HOP_TYPES = ("temporal-reasoning", "multi-session")
+
+
+def run_router(question, record, model, memory, budget_chars=6000):
+    """Route by question shape: multi-hop types get the tool protocol, the rest get
+    one budgeted block.
+
+    This is the *ceiling* of the routing idea -- it reads `question_type` from the
+    dataset, which a real router must infer from the text. Measure the ceiling
+    first; build the classifier only if it is worth it.
+    """
+    if record.get("question_type") in MULTI_HOP_TYPES:
+        return run_fly_agentic(question, record, model, memory, max_rounds=3)
+    return run_budget(question, record, model, memory, budget_chars=budget_chars)
+
+
+def run_extract(question, record, model, memory, budget_chars=6000,
+                per_entry_chars=600, topk=25):
+    """Answer-side aggregation: retrieve once, extract facts verbatim, then answer.
+
+    Upstream's P-ANSWER measured 6% -> 16% strict from this two-step protocol; the
+    failure it targets is counting/aggregation over scattered evidence, which no
+    retrieval change fixes.
+    """
+    from recall_block import pack
+    hits = memory.recall(question, top_k=topk)
+    entries = []
+    for entry, sim, _score in hits:
+        stamp = time.strftime("%Y-%m-%d", time.localtime(entry.timestamp))
+        entries.append((f"[#{entry.memory_id} | {sim:.2f} | {stamp}]", entry.text))
+    block, _stats = pack(entries, budget_chars=budget_chars,
+                         per_entry_chars=per_entry_chars)
+    facts = model.chat([
+        {"role": "system", "content":
+            "Extract every atomic fact relevant to the question from the context. "
+            "Copy numbers, dates and names VERBATIM, one fact per line. Do not "
+            "infer, do not summarise, do not answer the question yet."},
+        {"role": "user", "content": f"Context:\n{block}\n\nQuestion: {question}"},
+    ], max_tokens=700)
+    answer = model.chat([
+        {"role": "system", "content":
+            "Answer using ONLY the fact list. If the answer needs a count or an "
+            "arithmetic step, compute it explicitly from the facts. One short sentence."},
+        {"role": "user", "content": f"Question: {question}\nQuestion date: "
+                                    f"{record['question_date']}\nFacts:\n{facts}"},
+    ], max_tokens=300)
+    return answer, 1
 
 
 def run_budget(question, record, model, memory, budget_chars=6000,
@@ -430,7 +505,7 @@ def main():
     for index, record in enumerate(records, 1):
         question, truth = record["question"], record["answer"]
         qtype = record.get("question_type", "?")
-        needs_store = any(arm not in ("nomem", "fullctx", "mem0") for arm in cells)
+        needs_store = any(arm not in ("nomem", "fullctx", "mem0", "mem0infer") for arm in cells)
         memory = build_store(record) if needs_store else None
         print(f"[{index}/{len(records)}] {qtype}: {question[:70]}", flush=True)
         for arm in cells:
@@ -444,8 +519,14 @@ def main():
                 answer, rounds = run_rag(question, record, clients[arm], memory, topk=topk)
             elif arm == "hybrid":
                 answer, rounds = run_fly_hybrid(question, record, clients[arm], memory)
+            elif arm == "mem0infer":
+                answer, rounds = run_mem0_infer(question, record, clients[arm], memory)
             elif arm == "mem0":
                 answer, rounds = run_mem0(question, record, clients[arm], memory)
+            elif arm == "router":
+                answer, rounds = run_router(question, record, clients[arm], memory)
+            elif arm == "extract":
+                answer, rounds = run_extract(question, record, clients[arm], memory)
             elif arm == "budget":
                 answer, rounds = run_budget(question, record, clients[arm], memory)
             elif arm == "fullctx":
