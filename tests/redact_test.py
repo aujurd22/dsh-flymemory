@@ -8,8 +8,6 @@ import os
 import sys
 import time
 
-import numpy as np
-
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "python"))
 from flymemory.v3 import MemoryEntry, SmartMemory  # noqa: E402
 
@@ -22,7 +20,7 @@ def make(text, memory_id=1):
     memory.memories.append(MemoryEntry(
         text=text,
         response="",
-        embedding=np.zeros(384, dtype=np.float32),
+        embedding=None,          # redact re-embeds; the CI job has no numpy/torch
         timestamp=time.time(),
         last_accessed=0.0,
         access_count=0,
