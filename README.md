@@ -362,6 +362,25 @@ renames a model, the pass asks that provider's `/models` and retries once, so a
 stale name degrades instead of failing. Keys land in `<dataDir>/dream.json`, never
 in the package.
 
+**Redaction that keeps the history.** `dsh-flymemory redact <id>` scrubs
+credential-shaped spans from an entry in place: the secret leaves the store while the
+entry, its timestamps and its lineage stay. Deleting the entry would erase the audit
+trail along with the secret, which is the wrong trade -- a key reached this store on
+2026-11-01 and there was no way to scrub it without destroying the record.
+
+**A derived wiki page.** `dsh-flymemory wiki [--query q] [--limit n] [--out page.md]`
+renders the live store as a navigable "current truth": entity state first, then topic
+groups, then the most-used recent memories. Every line links back to the entry id, so
+the page is a view, never a second source of truth.
+
+**Dream into a shadow first.** `dream --shadow` writes its proposals to a JSON file
+instead of the library; review, then `dream --promote <file>`. Same idea as a dream
+that leaves its input store untouched: one bad pass cannot poison the store.
+
+**Concurrent writers.** Before each save the service compares the file fingerprint it
+loaded. If another process wrote the library meanwhile, it writes its own copy aside
+as `*.conflict-<timestamp>` instead of clobbering the other writer.
+
 **Injection is a character budget, not an entry count.** A k-sweep on the same
 data (top-5 40.0%, top-10 44.2%, top-20 49.2%, top-50 56.7%) showed the score is
 monotone in how much history reaches the reader, so the hook now asks the service

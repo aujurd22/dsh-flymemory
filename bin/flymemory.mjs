@@ -404,16 +404,69 @@ function dream() {
   }
   const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'python', 'dream.py')
   const args = [script, '--db', library, '--url', endpoint]
-  for (const name of ['--window', '--min-turns', '--compartment', '--model']) {
+  for (const name of ['--window', '--min-turns', '--compartment', '--model',
+    '--promote', '--shadow-dir']) {
     const value = flag(name)
     if (value !== undefined) args.push(name, value)
   }
   if (has('--dry-run')) args.push('--dry-run')
+  if (has('--shadow')) args.push('--shadow')
   const child = spawnSync(info.pythonExe || 'python', args, { stdio: 'inherit', env })
   process.exit(child.status ?? 1)
 }
 
-const commands = { status, start, stop, log: logCommand, doctor, mute, unmute: mute, ledger, version: versionCommand, dream }
+/** One MCP tools/call against the live service; returns its text. */
+async function mcpTool(endpoint, name, args) {
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
+  })
+  const raw = await response.text()
+  let payload = raw
+  for (const line of raw.split('\n')) {
+    if (line.startsWith('data:')) { payload = line.slice(5).trim(); break }
+  }
+  const data = JSON.parse(payload)
+  const content = data?.result?.content ?? []
+  return (Array.isArray(content) ? content : []).map((part) => part.text ?? '').join('\n')
+}
+
+function liveEndpoint() {
+  const state = readState(info.dataDir)
+  return state?.endpoint || readEffectiveEndpoint(info.dataDir) || info.url
+}
+
+/** Scrub a credential out of one entry while keeping its audit trail. */
+async function redact() {
+  const id = Number(positional[0])
+  if (!Number.isInteger(id)) {
+    console.error('usage: dsh-flymemory redact <memory-id>')
+    process.exit(2)
+  }
+  const text = await mcpTool(liveEndpoint(), 'flymemory_redact', { memory_id: id })
+  console.log(text)
+  process.exit(text.startsWith('[REDACTED]') ? 0 : 1)
+}
+
+/** The derived "current truth" page (knowledge-representation layer). */
+async function wiki() {
+  const args = { limit: Number(flag('--limit') || 40) }
+  const query = flag('--query')
+  if (query !== undefined) args.query = query
+  const compartment = flag('--compartment')
+  if (compartment !== undefined) args.compartment = compartment
+  const text = await mcpTool(liveEndpoint(), 'flymemory_wiki', args)
+  const out = flag('--out')
+  if (out !== undefined) {
+    writeFileSync(out, text.endsWith('\n') ? text : text + '\n', 'utf8')
+    console.log(`wiki written to ${out} (${text.split('\n').length} lines)`)
+  } else {
+    console.log(text)
+  }
+}
+
+const commands = { status, start, stop, log: logCommand, doctor, mute, unmute: mute, ledger, version: versionCommand, dream, redact, wiki }
 const run = commands[command]
 if (!run) {
   console.error(`unknown command "${command}"\n\nusage: dsh-flymemory [status|start|stop|log|doctor|mute|ledger|version] [--port N] [--data-dir DIR] [--python PATH]`)

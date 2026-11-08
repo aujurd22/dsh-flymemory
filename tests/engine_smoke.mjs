@@ -141,6 +141,11 @@ try {
   names = (listed.tools || []).map((tool) => tool.name)
   check(names.length >= 15, `tools discovered (${names.length})`, `${names.slice(0, 3).join(', ')}, …`)
   check(names.every((name) => name.startsWith('flymemory_')), 'every tool is namespaced flymemory_')
+  // Redaction and the derived wiki page are the two capabilities borrowed from
+  // Anthropic's memory design: scrub a secret without losing the audit trail, and
+  // read the store as a navigable "current truth".
+  check(names.includes('flymemory_redact'), 'redaction tool is published')
+  check(names.includes('flymemory_wiki'), 'wiki tool is published')
 } catch (error) {
   check(false, 'tools/list succeeded', String(error))
 }
@@ -194,6 +199,9 @@ try {
     query: 'batch probe', budget_chars: 3000, include_parents: true,
   })
   check(twoLevel.includes('capture batch'), 'recall_block adds the capture batch', twoLevel.split('\n').slice(2, 3).join('').slice(0, 60))
+
+  const wikiPage = await callTool('flymemory_wiki', { limit: 5 })
+  check(wikiPage.includes('当前真相'), 'wiki renders the current-truth page', wikiPage.split('\n')[0])
   if (created.length > 0) {
     const full = await callTool('flymemory_get_memory', { memory_id: created[created.length - 1] })
     check(full.includes('smoke probe'), 'flymemory_get_memory returned the full text')

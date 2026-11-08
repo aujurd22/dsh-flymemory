@@ -25,6 +25,7 @@ import argparse
 import json
 import re
 import os
+import pathlib
 import sys
 import time
 import urllib.error
@@ -285,7 +286,16 @@ def main():
     parser.add_argument("--min-turns", type=int, default=6)
     parser.add_argument("--dry-run", action="store_true", help="print, write nothing")
     parser.add_argument("--compartment", default="")
+    parser.add_argument("--shadow", action="store_true",
+                        help="do not write; save proposals to a JSON file for review")
+    parser.add_argument("--promote", default="",
+                        help="write the proposals saved by a previous --shadow run")
+    parser.add_argument("--shadow-dir", default="",
+                        help="where --shadow writes (default: next to the library)")
     args = parser.parse_args()
+
+    if args.promote:
+        return _promote(args)
 
     if not _provider_chain():
         print("dream: no provider key is available (set GROQ_API_KEY / "
@@ -326,6 +336,7 @@ def main():
         return 0
 
     stored = 0
+    proposals = []
     for entry in entries:
         supported, note = audit_entry(turns, entry)
         print(f"  [{'KEEP' if supported else 'DROP'}] {entry[:80]}"
@@ -338,14 +349,52 @@ def main():
         if args.dry_run:
             stored += 1
             continue
+        if args.shadow:
+            proposals.append(entry)
+            stored += 1
+            continue
         write_args = {"text": entry, "tags": "dream,distilled", "source": "model"}
         if args.compartment and args.compartment != "all":
             write_args["compartment"] = args.compartment
         result = mcp_call(args.url, "flymemory_remember", write_args)
         print(f"    -> {result[:100]}", flush=True)
         stored += 1
+    if args.shadow and proposals:
+        directory = pathlib.Path(args.shadow_dir) if args.shadow_dir else pathlib.Path(args.db).parent
+        directory.mkdir(parents=True, exist_ok=True)
+        target = directory / f"dream-shadow-{time.strftime('%Y%m%d-%H%M%S')}.json"
+        target.write_text(json.dumps({
+            "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "window_minutes": args.window,
+            "compartment": args.compartment,
+            "proposals": proposals,
+        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(f"dream: {len(proposals)} proposals written to {target}", flush=True)
+        print("       review, then: dream --promote " + str(target), flush=True)
+        return 0
+
     print(f"dream: {stored} entries "
           + ("(dry-run, not stored)" if args.dry_run else "stored via MCP"), flush=True)
+    return 0
+
+
+def _promote(args):
+    """Write the proposals a --shadow run left on disk."""
+    path = pathlib.Path(args.promote)
+    if not path.exists():
+        print(f"dream: proposal file not found: {path}", flush=True)
+        return 1
+    data = json.loads(path.read_text(encoding="utf-8"))
+    written = 0
+    for entry in data.get("proposals", []):
+        write_args = {"text": entry, "tags": "dream,distilled,promoted", "source": "model"}
+        compartment = data.get("compartment") or args.compartment
+        if compartment and compartment != "all":
+            write_args["compartment"] = compartment
+        result = mcp_call(args.url, "flymemory_remember", write_args)
+        written += 1
+        print(f"  -> {result[:90]}", flush=True)
+    print(f"dream: promoted {written} entries from {path.name}", flush=True)
     return 0
 
 
