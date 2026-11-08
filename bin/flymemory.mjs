@@ -406,12 +406,15 @@ function dream() {
   const args = [script, '--db', library, '--url', endpoint]
   for (const name of ['--window', '--min-turns', '--compartment', '--model',
     '--promote', '--shadow-dir', '--merge-limit', '--merge-min-sim',
-    '--merge-pool', '--cluster-limit', '--cluster-min-sim', '--cluster-pool']) {
+    '--merge-pool', '--cluster-limit', '--cluster-min-sim', '--cluster-pool',
+    '--reorg-buckets', '--reorg-per-bucket', '--reorg-days']) {
     const value = flag(name)
     if (value !== undefined) args.push(name, value)
   }
   if (has('--dry-run')) args.push('--dry-run')
   if (has('--shadow')) args.push('--shadow')
+  if (has('--reorganize')) args.push('--reorganize')
+  if (has('--reorganize-apply')) args.push('--reorganize-apply')
   if (has('--cluster')) args.push('--cluster')
   if (has('--cluster-apply')) args.push('--cluster-apply')
   if (has('--merge')) args.push('--merge')
@@ -456,6 +459,13 @@ async function redact() {
   process.exit(text.startsWith('[REDACTED]') ? 0 : 1)
 }
 
+/** Daily pass: mechanical cleanup, then one macro reading of the library. */
+async function reorganize() {
+  const text = await mcpTool(liveEndpoint(), 'flymemory_organize', { apply: has('--apply') })
+  console.log(text)
+  console.log('\n(reorganize runs the full macro pass through: dream --reorganize)')
+}
+
 /** Physically drop entries retired longer ago than the window (shrinks the file). */
 async function vacuum() {
   const days = Number(flag('--older-than') || 30)
@@ -488,7 +498,7 @@ async function wiki() {
   }
 }
 
-const commands = { status, start, stop, log: logCommand, doctor, mute, unmute: mute, ledger, version: versionCommand, dream, redact, wiki, organize, vacuum }
+const commands = { status, start, stop, log: logCommand, doctor, mute, unmute: mute, ledger, version: versionCommand, dream, redact, wiki, organize, vacuum, reorganize }
 const run = commands[command]
 if (!run) {
   console.error(`unknown command "${command}"\n\nusage: dsh-flymemory [status|start|stop|log|doctor|mute|ledger|version] [--port N] [--data-dir DIR] [--python PATH]`)
