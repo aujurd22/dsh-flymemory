@@ -362,6 +362,12 @@ renames a model, the pass asks that provider's `/models` and retries once, so a
 stale name degrades instead of failing. Keys land in `<dataDir>/dream.json`, never
 in the package.
 
+**Housekeeping (`organize`).** `dsh-flymemory organize [--apply]` is the garbage-collection
+half of dreaming: two live entries claiming one state key are retired to the newest,
+and byte-identical texts collapse, while near-duplicates and contradictions are only
+reported -- deciding that two similar entries are "the same fact" is a model judgment,
+and a wrong supersede hides evidence. `dream --organize` runs the same pass first.
+
 **Redaction that keeps the history.** `dsh-flymemory redact <id>` scrubs
 credential-shaped spans from an entry in place: the secret leaves the store while the
 entry, its timestamps and its lineage stay. Deleting the entry would erase the audit

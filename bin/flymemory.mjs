@@ -411,6 +411,8 @@ function dream() {
   }
   if (has('--dry-run')) args.push('--dry-run')
   if (has('--shadow')) args.push('--shadow')
+  if (has('--organize')) args.push('--organize')
+  if (has('--organize-apply')) args.push('--organize-apply')
   const child = spawnSync(info.pythonExe || 'python', args, { stdio: 'inherit', env })
   process.exit(child.status ?? 1)
 }
@@ -449,6 +451,13 @@ async function redact() {
   process.exit(text.startsWith('[REDACTED]') ? 0 : 1)
 }
 
+/** Housekeeping: retire what a newer entry has already replaced. */
+async function organize() {
+  const text = await mcpTool(liveEndpoint(), 'flymemory_organize',
+    { apply: has('--apply'), limit: Number(flag('--limit') || 40) })
+  console.log(text)
+}
+
 /** The derived "current truth" page (knowledge-representation layer). */
 async function wiki() {
   const args = { limit: Number(flag('--limit') || 40) }
@@ -466,7 +475,7 @@ async function wiki() {
   }
 }
 
-const commands = { status, start, stop, log: logCommand, doctor, mute, unmute: mute, ledger, version: versionCommand, dream, redact, wiki }
+const commands = { status, start, stop, log: logCommand, doctor, mute, unmute: mute, ledger, version: versionCommand, dream, redact, wiki, organize }
 const run = commands[command]
 if (!run) {
   console.error(`unknown command "${command}"\n\nusage: dsh-flymemory [status|start|stop|log|doctor|mute|ledger|version] [--port N] [--data-dir DIR] [--python PATH]`)

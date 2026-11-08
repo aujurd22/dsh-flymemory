@@ -285,6 +285,10 @@ def main():
     parser.add_argument("--window", type=float, default=90, help="RECENT window in minutes")
     parser.add_argument("--min-turns", type=int, default=6)
     parser.add_argument("--dry-run", action="store_true", help="print, write nothing")
+    parser.add_argument("--organize", action="store_true",
+                        help="first retire structurally stale entries (report only)")
+    parser.add_argument("--organize-apply", action="store_true",
+                        help="apply the retirement instead of reporting it")
     parser.add_argument("--compartment", default="")
     parser.add_argument("--shadow", action="store_true",
                         help="do not write; save proposals to a JSON file for review")
@@ -296,6 +300,11 @@ def main():
 
     if args.promote:
         return _promote(args)
+
+    if args.organize or args.organize_apply:
+        print(mcp_call(args.url, "flymemory_organize",
+              {"apply": bool(args.organize_apply)}), flush=True)
+        print(flush=True)
 
     if not _provider_chain():
         print("dream: no provider key is available (set GROQ_API_KEY / "

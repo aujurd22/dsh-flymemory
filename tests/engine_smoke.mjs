@@ -146,6 +146,7 @@ try {
   // read the store as a navigable "current truth".
   check(names.includes('flymemory_redact'), 'redaction tool is published')
   check(names.includes('flymemory_wiki'), 'wiki tool is published')
+  check(names.includes('flymemory_organize'), 'organize tool is published')
 } catch (error) {
   check(false, 'tools/list succeeded', String(error))
 }
@@ -202,6 +203,9 @@ try {
 
   const wikiPage = await callTool('flymemory_wiki', { limit: 5 })
   check(wikiPage.includes('当前真相'), 'wiki renders the current-truth page', wikiPage.split('\n')[0])
+
+  const housekeeping = await callTool('flymemory_organize', { apply: false })
+  check(housekeeping.includes('ORGANIZE'), 'organize reports a ledger', housekeeping.split('\n')[0])
   if (created.length > 0) {
     const full = await callTool('flymemory_get_memory', { memory_id: created[created.length - 1] })
     check(full.includes('smoke probe'), 'flymemory_get_memory returned the full text')
