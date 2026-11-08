@@ -5,630 +5,156 @@ English | [中文](README.zh.md)
 [![npm](https://img.shields.io/npm/v/dsh-flymemory)](https://www.npmjs.com/package/dsh-flymemory)
 [![Listed on dsh-plugin.org](https://dsh-plugin.org/badges/listed.svg)](https://dsh-plugin.org/plugins/aujurd22/dsh-flymemory)
 
-Long-term memory for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
+Long-term memory for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) —
+the kind that also remembers **what changed**.
 
-This is a plugin (a DSH *bundle*) that runs [FlyMemory](https://github.com/aujurd22/flymemory)
-as a local MCP service and plugs it into the harness. You end up with 16 memory
-tools, plus a pair of hooks that quietly record what you've been working on and
-pull the relevant bits back when they matter — so you stop re-explaining the same
-context every session.
+You know the feeling. New session, and you explain the project again: what it is, what
+we decided, what we tried, what broke. Ten minutes later the model confidently hands you
+a plan you abandoned three weeks ago, because that plan is still in its memory and
+nothing in the store knows it stopped being true.
 
-Everything stays on your machine. The service listens on `127.0.0.1:8791`, the
-library is a single file under your DSH home, and nothing is sent anywhere.
+That last part is what this plugin is about. Most memory tools solve "remember more".
+This one also solves "stop believing the old version".
 
-```
-DSH session ──┬── mcp__flymemory__*   15 tools the model can call
-              └── hooks               recall before a turn, store after it
-                        │
-                        ▼
-              FlyMemory service on 127.0.0.1:8791
-                        │
-                        ▼
-              $DSH_HOME/flymemory-data/flymemory_v3.pkl
+## Try it
+
+```bash
+npm i dsh-flymemory          # once; the memory service comes up with the harness
+dsh-flymemory status         # is it running, where is the library, what is in it
 ```
 
-## Why not just a vector store
+Then in DSH just ask something you discussed in another session. If it answers with
+context you didn't give it, it's working.
 
-Most agent "memory" plugins are a note table plus cosine search. This is a full
-store, and the differences show up in ordinary work:
+Two things happen on install:
 
-| | a note table + cosine search | dsh-flymemory |
-|---|---|---|
-| A fact changed | old and new both come back | `supersede` retires the old one; recall hides it unless you ask for history |
-| The same thing said twice | piles up | length-tiered dedup merges or strengthens instead |
-| "What is X *now*" | you write the query yourself | `state_key`/`state_value` keep a current value plus its chain of previous ones |
-| Age | everything looks equally fresh | power-law decay weights results by retention |
-| Where an entry came from | lost | `source` (model-judged vs mechanically captured) and `app:<name>` |
-| Several clients | one store each | ZCode, Qoder and DSH can share one store; `app=` tags say who wrote what |
-| Per-turn cost | full text or nothing | a bounded pointer index (≤1.2 KB), and the model pulls what it needs |
-| Did anyone use it | unknown | `usegate.jsonl`: every injected pointer accounted as expanded / recalled / superseded |
+- the first start takes **~10–13 seconds** (the embedding model loads); after that the
+  service stays up and answers in milliseconds;
+- the very first install also downloads a **915 MB** multilingual embedding model, once.
 
-Measured upstream, not re-run here (protocols live in the FlyMemory repo):
+Everything stays on your machine: one library file and one ledger, both under
+`$DSH_HOME/flymemory-data`. Nothing is sent anywhere.
 
-- aggregation questions: one-shot top-5 scored **6% strict**, the "collect wide,
-  then read each entry verbatim" protocol **16%** (P-ANSWER);
-- two-hop questions: letting a retriever filter candidates first cut the evidence
-  from **100% to 75%** (P-COMBO);
-- pointer injection lifted evidence-in-pool **63.9% → 74.4%** but at **12.15×**
-  pool tokens (P-USEGATE, verdict PARTIAL) — which is exactly why this plugin
-  points at entries and never expands one by itself.
+## What it actually does
 
-What this page does **not** claim: that a memory store makes a model smarter, or
-that this recall wins on every metric. The honest summary of the upstream record
-is that *structured* memory reproduces across runs, while adaptive read policies
-have not (yet) survived independent replication.
-
-## The notebook, and who does the thinking
-
-The engine is easier to explain as a notebook than as an architecture.
-
-Every sentence you send gets written on its own line, so topics don't blur
-together. Say something nearly identical and the old line is underlined harder
-instead of copied twice. *Correct* something ("actually I moved to Hangzhou") and
-the old line is crossed out, not torn out — you can still read crossed-out lines
-when you ask about history. Short scribbles condense into summary notes; anything
-untouched for months fades (power law: the true half-life is 3τ, 90 days by
-default). Finding a line works two ways at once: by meaning, and by the exact
-keywords embeddings cannot see — part numbers, file paths, ids.
-
-The division of labour is the design bet: **the server never runs an LLM.** It owns
-the mechanical part — chunking, dedup, fusion, decay math, lineage hygiene,
-persistence; the calling model owns every judgment — what matters, what is
-outdated, what is worth forgetting. A wrong judgment is therefore a *recorded*
-wrong judgment: `supersede` leaves a tombstone with `valid_from`/`valid_to`
-instead of a hole.
-
-An entry's life:
-
-1. **write** — a hook captures it, or the model stores it deliberately (`source`
-   keeps the two apart);
-2. **strengthen** — a near-duplicate updates the existing entry rather than
-   adding a second copy; dedup is length-tiered and prefers *not* merging;
-3. **supersede** — `supersede(old, new)` retires an outdated state; it stays
-   queryable via `include_superseded` while normal recall skips it;
-4. **consolidate** — `consolidate(ids, conclusion)` builds a higher-level entry
-   that keeps `evidence_ids` back-links, so abstraction never destroys the raw
-   material;
-5. **fade or forget** — power-law decay prunes what nothing touches; `forget`
-   removes something that was simply wrong.
-
-The ablated versions of these rules, including the ones that measured *worse* than
-doing nothing, stay in the engine repo:
-[source](https://github.com/aujurd22/flymemory) ·
-[research ledger](https://github.com/aujurd22/flymemory/blob/main/research/RESEARCH.md).
-
-![Consolidation must overlay, never replace; anchored judgment is near-mechanical](https://raw.githubusercontent.com/aujurd22/flymemory/main/docs/img/laws.png)
-
-*Two of the engine's laws. Left: replace-style abstraction scores 10 points below
-storing nothing, so consolidation overlays instead. Right: the same 48 turns
-through two collection strategies — anchored judgment is near-mechanical,
-pre-registered paired experiment, discordant 13:0.*
-
-## What you get
-
-Fifteen tools, all under the `mcp__flymemory__` prefix:
-
-| Tool | What it's for |
+| | what you get |
 |---|---|
-| `flymemory_remember` | Store a decision or finding. Near-duplicates are merged automatically. `compartment` groups entries by topic; `state_key`/`state_value` track "the current value of X" and retire the old one. |
-| `flymemory_recall` | Search. Dense embeddings and keyword matching are fused, older entries fade, and results come back with id, age and where they came from. `include_superseded` digs into history. |
-| `flymemory_auto` | Recall and store in one call. This is what the hooks use. |
-| `flymemory_recall_index` / `flymemory_get_memory` | Look first, read later: a one-line index, then the full text of whatever looks interesting. |
-| `flymemory_supersede` | Say "this old entry is out of date, that one replaces it". |
-| `flymemory_state_lookup` / `flymemory_state_history` | Current value for an entity key, or the whole history of it. |
-| `flymemory_consolidate` | Fold several entries into one conclusion; the originals stay as evidence. |
-| `flymemory_find_conflicts` / `flymemory_insights` | Pairs that look contradictory; valuable entries that are fading. |
-| `flymemory_forget` / `flymemory_cleanup` | Delete one entry, or sweep everything that has decayed past a threshold. |
-| `flymemory_session_pack` | A short pack of the recent trail and the latest conclusions. |
-| `flymemory_stats` | Counts, ages, access counts. |
+| **Remembers across sessions and clients** | ZCode, Qoder and DSH can share one library; each entry is tagged with the client that wrote it, so the recall can say who told whom |
+| **Knows what's out of date** | when a fact changes, the old entry is *retired*, not deleted: it keeps `valid_from`/`valid_to` and the entry that replaced it, and stops showing up in normal recall |
+| **Answers "why did I think that back then"** | the retired entry is still there with its dates, so the history is inspectable instead of overwritten |
+| **Keeps the per-turn cost small** | each turn injects a bounded index (≤1.2 KB) of pointers; the model pulls the full text only for what it needs |
+| **Shows what got used** | `usegate.jsonl` records every injected pointer, whether it was expanded, recalled again, or superseded — you can finally see whether the memory is doing anything |
+| **Cleans up after itself** | daily pass: merge duplicates with the model, retire stale state, fold groups, shrink the file |
 
-And two hooks that work on their own:
+## The three things you'll use most
 
-- **On every prompt** — the prompt is stored, and memories that match it get
-  appended to the turn. No model call, just local search.
-- **On session start** — a recovery pack of recent activity, so a fresh session
-  isn't starting from nothing.
+```bash
+dsh-flymemory doctor     # why isn't it working (python, model, port, library) in one screen
+dsh-flymemory ledger     # what got injected last session, and what was actually used
+dsh-flymemory wiki       # the library as a readable "current truth" page
+```
 
-Both hooks are silent when the service is down, and neither can block a turn.
+And when you want it to think about itself:
+
+```bash
+dsh-flymemory dream --window 90          # distill the last 90 minutes into durable notes
+dsh-flymemory dream --reorganize         # the daily macro pass (see below)
+dsh-flymemory organize --apply           # retire stale states, collapse exact duplicates
+dsh-flymemory vacuum --older-than 30     # physically shrink the file
+```
+
+## Why not just a note table with cosine search
+
+A note table stores text and finds similar text. That covers half the job. The other
+half is knowing which of those notes is still true.
+
+| | note table + cosine | dsh-flymemory |
+|---|---|---|
+| a fact changed | old and new both come back | the old one is retired and hidden from recall |
+| the same thing said twice | piles up | length-tiered dedup merges or strengthens |
+| "what is X *now*" | you write the query | `state_key` keeps the current value plus its chain of previous values |
+| age | everything looks equally fresh | power-law decay weights by retention |
+| where it came from | lost | `source` and `app:<name>` on every entry |
+| did it help | unknown | the usage ledger |
+
+## Waking up once a day
+
+A per-window pass can't see that two topics are the same thing. A whole-store rewrite
+can, but it risks drift. The daily pass sits in between: it reads a bounded digest
+(8 topic buckets × 12 entries), asks the model for at most three durable conclusions
+plus redundant pairs, and writes them as **one** playbook entry — yesterday's playbook
+is retired into it, so there is always exactly one current macro view.
+
+On Windows it's a scheduled task at 04:30; elsewhere, a cron line:
+
+```
+30 4 * * *  dsh-flymemory dream --reorganize --reorganize-apply
+```
+
+## How well it works
+
+Short version: on a public long-memory benchmark (LongMemEval oracle, 120 questions,
+same reader and judge for every arm), this plugin's protocol scored **69.2%** where
+plain retrieval scored 50.8%, using about a third of the tokens that pasting the whole
+history costs. Against a widely used memory library it's a **tie** (58.3% vs 56.7%).
+
+Things it is *not*: smarter than the model, better than reading everything when the
+history is short, or good at guessing your preferences. The full numbers, the protocols
+and the negative results are in [docs/COMPARISON.md](docs/COMPARISON.md) — including
+one we falsified ourselves ("few but dense" notes do not work for raw conversation).
+
+## Honest limits
+
+- **One writer at a time.** The service serialises writes; two processes pointed at the
+  same file will fight, and the second one now writes a `*.conflict-<time>` copy instead
+  of silently clobbering.
+- **Preferences are weak.** The benchmark says so; don't expect a profile feature.
+- **Heavier than a pure-JS plugin.** Python plus a 915 MB model, versus a SQLite file.
+  If you want zero dependencies, there are simpler options.
+- **Recall is top-k.** An entry that is semantically distant won't come back; that's
+  retrieval, not a bug we can wish away.
 
 ## Requirements
 
-- DeepSeek Harness with `@deepseek-ai/dsh-mcp-client` available. Built and
-  tested against `0.2.0-rc.2` and `44.7.0`.
-- Node 20+ (the add-on and its CLI).
-- Python 3.10+ with the engine's dependencies:
+- DeepSeek Harness (this is a bundle plugin)
+- Python 3.10+ with `torch` and `sentence-transformers` (the CLI finds it for you and
+  `doctor` tells you if it can't)
+- Node 20+
 
-  ```bash
-  pip install torch sentence-transformers "mcp>=1.30,<2" numpy
-  ```
+## Configuration
 
-  The plugin finds the interpreter for you: it checks `FLYMEMORY_PYTHON`, the
-  usual install locations, then `PATH`, and it verifies that
-  `sentence_transformers` actually imports before picking one. On a machine with
-  several Pythons that saves you the "why won't it start" half hour.
+Set in your profile's `cordis.patch.yml`, or leave the defaults:
 
-  The first run downloads the multilingual embedding model (~470 MB) into the
-  HuggingFace cache. After that it works offline.
-
-## Install
-
-```bash
-# from npm (published 2026-10-26)
-dsh plugin --profile desktop add dsh-flymemory
-
-# from GitHub (use your own profile name)
-dsh plugin --profile desktop add github:aujurd22/dsh-flymemory
-
-# from a local checkout (absolute path)
-dsh plugin --profile desktop add /absolute/path/to/dsh-flymemory
-```
-
-Or, from inside an agent session, point the `plugin_manager` tool at the same
-spec:
-
-```
-plugin_manager(action: "install_bundle", target: "dsh-flymemory")
-plugin_manager(action: "install_bundle", target: "github:aujurd22/dsh-flymemory")
-plugin_manager(action: "install_bundle", target: "/absolute/path/to/dsh-flymemory")
-```
-
-Or use the **Plugins** page in the Web sidebar and pick the folder. The harness
-reloads, two rows come up (`flymemory`, `flymemory-mcp`), and the tools appear.
-
-**Trust signals.** License: MIT. Profile: any base-backed profile
-(`desktop`/`web`); written against DSH `0.2.0-rc.2` and verified on `44.7.0`.
-Permissions: it writes one data directory under `$DSH_HOME`, starts a Python
-child process, and talks to it over `127.0.0.1` only — no credentials required
-and no outbound network calls. External requirement: Python 3.10+ with torch and
-sentence-transformers (see above); the engine is vendored, so no separate
-FlyMemory checkout is needed.
-
-Check it:
-
-```bash
-node bin/flymemory.mjs status     # what it resolved, and what's live
-node bin/flymemory.mjs doctor     # interpreter, dependencies, endpoint
-```
-
-Then ask the model to remember something and search for it. If the tools don't
-show up, `doctor` usually says why.
-
-Removing it is the same in reverse:
-
-```
-plugin_manager(action: "remove_bundle", target: "dsh-flymemory")
-```
-
-Your memory file is not deleted — remove it by hand if you want it gone.
-
-## How it runs
-
-The bundle inserts two rows:
-
-| Row | Module | Job |
+| key | default | what it does |
 |---|---|---|
-| `flymemory` | this package | Probes the port, starts the engine if nothing is there, records the resolved settings, registers the recall/capture hooks |
-| `flymemory-mcp` | `@deepseek-ai/dsh-mcp-client` | Turns the service's tools into `mcp__flymemory__<tool>` |
-
-The hooks used to ride DSH's Claude-Code hook bridge. Builds from 44.7 onwards no
-longer ship that package, so the same logic now runs on the plugin's own
-`agent/pre-step` listener and the bundle declares no hook-bridge dependency.
-
-When the harness starts, the first row checks `127.0.0.1:8791`. If a FlyMemory
-service is already answering there, it's reused — two harness windows share one
-engine and one library. If the port is free, the bundled engine starts in the
-background and the row waits for it before letting the next row connect. If
-something else owns the port, the plugin says so and leaves it alone; it never
-kills a process it didn't start.
-
-Cold starts are slow: the engine imports torch before it can listen, which takes
-15–20 seconds. The row waits up to 25 seconds by default, and the mcp-client
-reconnects on its own if it has to.
-
-If the engine can't start at all — no interpreter, missing dependency, port
-conflict — the harness still boots. You just don't get the tools, and the reason
-is in the log.
-
-## Settings
-
-Environment variables, read before the harness starts:
-
-| Variable | Default | |
-|---|---|---|
-| `FLYMEMORY_MCP_PORT` | `8791` | Service port |
-| `FLYMEMORY_MCP_URL` | `http://127.0.0.1:<port>/mcp?app=dsh` | Full endpoint (an `?app=` already present is kept) |
-| `FLYMEMORY_APP` | `dsh` | Source tag written on every entry this plugin stores |
-| `FLYMEMORY_DATA_DIR` | `$DSH_HOME/flymemory-data` | Library, logs, settings record, pid file |
-| `FLYMEMORY_PYTHON` | auto-detected | Interpreter for the engine |
-| `FLYMEMORY_DEVICE` / `FLYMEMORY_MODEL` | `cpu` / multilingual MiniLM | Passed to the engine |
-
-A FlyMemory service can be shared by several clients, and each write carries an
-`app:<name>` tag saying which one produced it. This plugin connects with
-`?app=dsh`, so its entries are marked `app=dsh` in recall output and counted under
-`Apps:` in `flymemory_stats` — next to ZCode's `app=zcode` and older untagged
-`app=legacy` entries. Change the tag with `FLYMEMORY_APP` if you run several DSH
-profiles against one store.
-
-Anything else goes on the row itself, in your profile's `cordis.patch.yml`. A
-patch entry replaces the whole `config`, so write out everything you need:
-
-```yaml
-- id: flymemory
-  name: 'dsh-flymemory'
-  config:
-    port: 8791
-    dataDir: 'D:\dsh-memory'
-    libraryPath: 'D:\dsh-memory\my-lib.pkl'
-    pythonExe: 'C:\Python313\python.exe'
-    device: cpu
-    readinessTimeoutMs: 25000   # 0 = don't wait, let the tools show up later
-    shutdownOnDispose: true     # stop the engine this activation started
-    nativeHooks: true           # recall/capture on every typed prompt
-    hookTimeoutMs: 6000         # budget per hook request
-    workingContext: true        # publish a bounded memory digest per request
-    workingContextChars: 1200   # cap for that digest, wrapper included
-    workingContextMinutes: 240  # how far back the digest looks (pack mode only)
-    workingContextSource: index # index = retrieve against this step's text; pack = clock window
-    workingContextTopK: 8       # pointers per digest in index mode
-    useGate: true               # account injected pointers -> expansions/re-calls
-    recallProtocol: true        # tell the model to pull before answering (see below)
-    # engine-side: FLYMEMORY_SAVE_DEBOUNCE=5 (seconds) batches disk writes; 0 = write-through
-    writeHooksConfig: true      # also write hooks.json for clients outside DSH
-    seedFromUpstream: false     # don't import another library implicitly
-    upstreamLibrary: ''         # set both to import one, once
-    autostart: true
-```
-
-The rest of the options are documented in `resolveOptions()` in
-[lib/index.js](lib/index.js). Unknown keys are ignored.
-
-## Where your memory lives
-
-`$DSH_HOME/flymemory-data/flymemory_v3.pkl` — one file, plain data, easy to back
-up or delete. Alongside it:
-
-- `hooks.json` — regenerated on every activation; describes the two hooks
-- `state.json` — what the last activation resolved (endpoint, library,
-  interpreter, how the service was obtained); `status` and `doctor` read it, so
-  they report an override instead of the defaults
-- `engine.log` — stdout/stderr of the engine process
-- `server.log` — the engine's own log
-- `server.pid` — so `flymemory stop` knows what to kill
-
-To run the service on its own, without the harness:
-
-```bash
-node bin/flymemory.mjs start
-node bin/flymemory.mjs stop
-node bin/flymemory.mjs log -n 40
-node bin/flymemory.mjs mute 30m     # silence the per-request digest (tools keep working)
-node bin/flymemory.mjs mute off
-node bin/flymemory.mjs ledger       # injection -> use rate and hottest ids (add --json)
-node bin/flymemory.mjs version      # this copy vs the published one 
-```
-
-Nothing auto-updates: DSH never polls the registry, so `dsh plugin --profile
-<profile> add dsh-flymemory` again is the upgrade. `version` tells you whether
-one exists.
-
-After installing the bundle, the same CLI is linked into the profile at
-`<profile>/node_modules/.bin/dsh-flymemory`.
-
-## About the hooks
-
-They're on by default, because automatic memory is the whole point of the thing.
-
-**The recipe, and what it is worth.** Two changes were measured separately and
-then stacked, on LongMemEval with the reader held fixed (120 questions):
-
-| what | strict | prompt tokens / answer |
-|---|---|---|
-| RAG top-20 | 50.8% | ~545 |
-| two-level block (sentence hits + the capture batches they came from) | 57.5% | ~1,728 |
-| extract-then-compute answering | 56.7% | ~1,272 |
-| **both, which is what this plugin now does** | **69.2%** | ~1,947 |
-| the entire history in one prompt | 76.7% | ~6,230 |
-
-The parent blocks come from `flymemory_recall_block(include_parents=True)`, which
-groups entries by app and an activity window (`parent_window_s`, default 300s,
-capped at `parent_max_entries`, default 20). That is the production stand-in for
-the "session" the benchmark used; it is coarser, so the measured +13.4pp is a
-direction, not a promise for this store.
-
-Both halves are independently significant (paired p=0.007 and p=0.001 against
-either half alone). The block comes from `flymemory_recall_block` with
-`include_parents`; the answer half is a short prompt section that says: for
-counting / ordering / comparison questions, copy the facts out verbatim first,
-then compute. `answerProtocol: false` removes that section.
-
-**Dreaming (idle consolidation).** `dsh-flymemory dream [--window 90] [--min-turns 6]
-[--dry-run]` distils the recent window into durable entries and stores them through
-the running service. Every entry is judged against the source turns first and
-dropped if unsupported, so the pass cannot invent history. It needs an
-OpenAI-compatible key in `FLYMEMORY_DREAM_API_KEY` (or `AMDRADEON_API_KEY`); the
-default endpoint is AMD's free one and the default model is `Qwen3.8-Flash-Next`
--- measured on that endpoint 2026-10-31: clean JSON in ~13s, where GLM-5.3-Flash
-takes ~27s, MiMo 61s, and DeepSeek-V4.1-Flash answers 429 under load. Without a key the command exits without touching anything.
-
-Providers are additive, so a chain is one command each:
-
-    dsh-flymemory dream --set-key <key> --provider groq      # 30 RPM / 1,000 RPD, fastest
-    dsh-flymemory dream --set-key <key> --provider cerebras  # highest daily allowance
-    dsh-flymemory dream --set-key <key> --provider nvidia    # 40 RPM, no credit card
-    dsh-flymemory dream --set-key <key> --provider amd       # free but congested
-
-Known endpoints live in `PROVIDERS` inside `python/dream.py`; if a provider
-renames a model, the pass asks that provider's `/models` and retries once, so a
-stale name degrades instead of failing. Keys land in `<dataDir>/dream.json`, never
-in the package.
-
-**Folding a whole group (`dream --cluster`).** Pairwise merging cannot converge
-when one fact was written five times: it merges two, then two more, and the copies
-that remain keep coming back. `dream --cluster` asks the model about the whole group
-at once -- one sentence covering every member, or the ids that differ -- and retires
-the originals. The threshold defaults to 0.82 because the library measured 0 shared
-groups at 0.86 and two (correctly rejected) at 0.82: write-time dedup already removes
-most 3-way duplicates, so the pass is a safety net, not the main path.
-
-**Shrinking the file (`vacuum`).** `dsh-flymemory vacuum --older-than 30 [--apply]`
-physically drops entries retired longer ago than the window -- the only operation
-that makes the library smaller. First live run: 20,550 -> 18,256 entries, 71.6 MB ->
-63.6 MB, with every entry retired inside the window kept so a recent rollback is
-still possible.
-
-**Merging with the model (`dream --merge`).** Mechanical housekeeping can only retire
-exact copies and stale state keys; "these two sentences say the same thing" is a
-judgment. `dream --merge` sends near-duplicate pairs to the model, which must answer
-`same`/`different` plus one sentence that keeps every concrete detail. Identical facts
-collapse into one entry (the originals are superseded, never deleted); disagreements
-are left alone and reported with a reason. `--merge-apply` writes; plain `--merge`
-only shows the verdicts. The similarity floor defaults to 0.80 because that is where
-this library actually has candidates -- the highest cosine in any 4,000-entry pool
-measured 0.885, so the old 0.92 could never fire.
-
-**Housekeeping (`organize`).** `dsh-flymemory organize [--apply]` is the garbage-collection
-half of dreaming: two live entries claiming one state key are retired to the newest,
-and byte-identical texts collapse, while near-duplicates and contradictions are only
-reported -- deciding that two similar entries are "the same fact" is a model judgment,
-and a wrong supersede hides evidence. `dream --organize` runs the same pass first.
-
-**Redaction that keeps the history.** `dsh-flymemory redact <id>` scrubs
-credential-shaped spans from an entry in place: the secret leaves the store while the
-entry, its timestamps and its lineage stay. Deleting the entry would erase the audit
-trail along with the secret, which is the wrong trade -- a key reached this store on
-2026-11-01 and there was no way to scrub it without destroying the record.
-
-**A derived wiki page.** `dsh-flymemory wiki [--query q] [--limit n] [--out page.md]`
-renders the live store as a navigable "current truth": entity state first, then topic
-groups, then the most-used recent memories. Every line links back to the entry id, so
-the page is a view, never a second source of truth.
-
-**Dream into a shadow first.** `dream --shadow` writes its proposals to a JSON file
-instead of the library; review, then `dream --promote <file>`. Same idea as a dream
-that leaves its input store untouched: one bad pass cannot poison the store.
-
-**Concurrent writers.** Before each save the service compares the file fingerprint it
-loaded. If another process wrote the library meanwhile, it writes its own copy aside
-as `*.conflict-<timestamp>` instead of clobbering the other writer.
-
-**Injection is a character budget, not an entry count.** A k-sweep on the same
-data (top-5 40.0%, top-10 44.2%, top-20 49.2%, top-50 56.7%) showed the score is
-monotone in how much history reaches the reader, so the hook now asks the service
-for `flymemory_recall_block`: the best entries' **full text**, packed until a
-character budget (`FLYMEMORY_INJECT_CHARS`, default 6000) is spent. Servers older
-than 1.6.0 do not expose that tool and the hook falls back to one-line recall, so
-mixing this plugin with an older FlyMemory build still works.
-
-**A measured comparison, and what it changed.** LongMemEval oracle, 200 questions,
-one reader (2026-10-30): no memory 3.5%, top-5 full text 41.0%, pointer lines only
-36.0%, pointers plus the top two hits inlined 37.0%, and the agentic protocol --
-the model searches and reads what it needs -- **54.0%** (McNemar against top-5:
-p<0.001). Two conclusions: the gain lives in *letting the model pull*, not in
-prettier injection; and inlining the closest hits changes nothing (37.0 vs 36.0,
-p=0.815), which is why `FLYMEMORY_HYBRID_FULL` defaults to off and exists only as
-an experiment switch.
-
-One thing they do **not** inject: upstream`s `RECENT CONTEXT (last ~90 min)` block. It is
-a clock window over the whole library, and entries carry no session id — with several
-conversations sharing one store, it pulls another conversation's work into this one.
-Recall is scoped by the text you just typed instead. If you want the old behaviour,
-start the engine with `FLYMEMORY_RECENT_MINUTES=90`.
-They run inside this plugin on `agent/pre-step` — no hook bridge package needed.
-Worth knowing exactly what that means:
-
-- **Only messages you actually typed are stored and recalled.** The harness tags
-  a typed prompt `source.kind === "user"`; peer deliveries, system reminders,
-  automation prompts and model-change notices carry other kinds and are ignored.
-  A delegated agent gets one recall at task start, then nothing more.
-- Credential-shaped text never gets stored, and automation/heartbeat prompts are
-  skipped before they reach the service.
-- Recalled memories are appended to the turn, capped at about 2.5 KB, with a
-  header saying they are data rather than instructions.
-- A second request pulls the top two entries of `compartment="lessons"` and
-  injects them on their own, so pitfalls come back every turn instead of
-  competing with ordinary recall. Store one with `flymemory_remember` and
-  `compartment="lessons"`, starting the text with the tool or environment names
-  that should bring it back — the keyword channel is what finds it.
-
-If you'd rather have the tools and no automation, turn the hooks off on the row
-(a patch entry replaces the whole `config`, so restate what you need):
-
-```yaml
-- id: flymemory
-  name: 'dsh-flymemory'
-  config:
-    port: 8791
-    nativeHooks: false
-```
-
-## Keeping context in a band
-
-A session should not have to fill the window before anything happens. Four
-pieces keep each request small and keep what matters available.
-
-**1. The working context is an index, not a memory dump.** On every request the
-plugin publishes `<working-context source="flymemory" type="index">`: at most
-1.2 KB of pointers (`#id | age | app | one line`), with the header saying to call
-`flymemory_get_memory(id)` before acting on one.
-
-The pointers are **retrieved against the text entering this step**
-(`flymemory_recall_index`), not against a clock. That matters more than it
-sounds: the store has no session id, so any time-windowed digest is store-wide —
-it shows whatever any host wrote last, and that is exactly how another
-conversation's task leaks into this one. `workingContextSource: pack` restores
-the old clock-windowed behaviour if you want it.
-
-**A short memory protocol rides along.** Because the measured gain comes from the
-model *choosing* to pull (54.0% vs 41.0%, see below), the plugin adds one system
-section: when an answer depends on an earlier session, call
-`flymemory_recall_index` first, `flymemory_get_memory` for the pointers the answer
-hinges on, then answer with the id cited. `recallProtocol: false` removes it.
-
-The model pulls the full text; the plugin never expands a pointer itself. That split is deliberate — upstream
-measured the pointer form at +10.5pp evidence coverage **only when the pointer
-was followed by an expansion**, and that expansion cost 12.15× pool tokens
-(P-USEGATE, 2026-10-26), so expansion stays a model decision. The context is
-optional: a runtime suppressor can drop it, `dsh-flymemory mute` silences it for
-a while, and a memory outage just leaves the previous digest in place.
-
-**2. use_gate accounting.** Every pointer id that reaches the prompt is stamped
-into a per-session ledger (`<dataDir>/usegate.jsonl`, one JSON line per event,
-shaped like upstream's `injected id -> uses`). A later `flymemory_get_memory`,
-recall or `flymemory_supersede` is attributed to it as `expanded`, `recalled` or
-`superseded`. `dsh-flymemory ledger` reports the injection→use rate and the
-hottest ids — the measurement upstream adopted (it closes the "injected, but
-nobody records whether it was ever used" gap).
-
-**3. Condensation goes back to memory.** When the session logs a
-`compaction/summary`, its text is stored as a `checkpoint,compaction` entry in
-the `context` compartment. The condensed history stays recallable, and the store
-remains the authority rather than the checkpoint being the only copy.
-
-**4. Early compaction (opt-in).** DSH's `compaction-basic` row lives inside the
-agent preset, so its threshold can only be changed by restating the preset.
-[`examples/early-band.patch.yml`](examples/early-band.patch.yml) does that with
-three numbers: compact at **45%** of the window instead of 80%, keep **12%**
-verbatim instead of 16%, and a smaller headroom so small windows are valid. Paste
-it into your profile patch. It pins a copy of the preset declaration — regenerate
-it after a DSH upgrade instead of letting it go stale.
-
-What this deliberately does *not* do: it does not replace DSH's compaction
-backend, and cannot — a zero-dependency plugin cannot import
-`@deepseek-ai/dsh-compaction`. So the condensing itself stays DSH's, driven
-earlier by the preset change, while FlyMemory owns what the model sees every turn
-and keeps whatever was condensed.
-
-Prior art this borrows from:
-
-- [MemGPT / Letta (arXiv 2310.08560)](https://arxiv.org/abs/2310.08560) — treat
-  the context window as RAM and an external store as disk, paging explicitly
-  between them.
-- InfiAgent ([ACL Anthology](https://aclanthology.org/people/li-ming/)) — keep the
-  reasoning context bounded by rebuilding it from a state snapshot plus a fixed
-  recent window, instead of compressing only on overflow.
-- [Chroma's "context rot" measurements](https://research.trychroma.com/context-rot)
-  — long contexts degrade; prefer fewer, higher-signal tokens over a bigger
-  window.
-
-## Importing a library you already have
-
-Nothing is imported unless you ask. If you have a FlyMemory library from
-somewhere else and want to move it in, point the plugin at it once:
-
-```yaml
-- id: flymemory
-  name: 'dsh-flymemory'
-  config:
-    port: 8791
-    upstreamLibrary: 'D:\path\to\flymemory_v3.pkl'
-    seedFromUpstream: true
-```
-
-On the next activation the file is copied into place if the target doesn't exist
-yet. The original is left alone. The format is the same in both directions, so
-you can move it back out later.
-
-## Sharing a service you already run
-
-If a FlyMemory service is already running on this machine and you want DSH to
-share its memory rather than keep its own, override both rows in your profile
-patch:
-
-```yaml
-- id: flymemory
-  name: 'dsh-flymemory'
-  config:
-    port: 8765
-    libraryPath: 'D:\path\to\flymemory_v3.pkl'
-- id: flymemory-mcp
-  name: '@deepseek-ai/dsh-mcp-client'
-  config:
-    serverName: flymemory
-    transport: streamable-http
-    url: 'http://127.0.0.1:8765/mcp'
-```
-
-`port` is where the plugin looks for the existing service; `libraryPath` is the
-file it serves if it ever has to start the engine itself, so both routes lead to
-the same memory. Leave the hooks row alone — it follows the endpoint the plugin
-resolved. `node bin/flymemory.mjs status` prints "from hooks.json" when an
-override like this is in effect, so you can tell it apart from the defaults.
-
-<details>
-<summary>Why the hooks row needs no override</summary>
-
-The supervisor writes `<dataDir>/hooks.json` on every activation from the config
-it resolved, so the hook scripts always post to whatever endpoint the plugin
-actually uses. That file is also how `status` and `doctor` discover an override.
-
-</details>
-
-## Working on it
-
-```bash
-node --check lib/index.js    # syntax
-npm test                     # unit tests, no Python needed, ~0.3 s
-node tests/engine_smoke.mjs  # end-to-end against the real engine (needs torch)
-python tests/http_smoke.py   # protocol check against a running service
-```
-
-`npm test` covers the parts that are easy to get wrong: port and library
-defaults, config precedence, the generated hook file, endpoint probing. The
-engine smoke test runs `apply()` in a throwaway directory against a real Python
-engine — it needs torch and sentence-transformers, and prints SKIP if they aren't
-there. CI runs the syntax check and the unit tests on Linux, macOS and Windows
-across Node 20, 22 and 24.
+| `port` | `8791` | where the memory service listens |
+| `libraryPath` | under the data dir | which library to use (point several clients at one) |
+| `workingContextChars` | `1200` | size of the pointer index injected each turn |
+| `workingContextRefreshMs` | `45000` | how often that index refreshes |
+| `recallProtocol` | `true` | the "pull what you need" prompt section |
+| `answerProtocol` | `true` | the "extract facts, then compute" section |
+| `checkpointContract` | `true` | fold compaction summaries back into memory |
+
+## Tools the model can call
+
+23 MCP tools. The ones that matter most:
+
+`flymemory_recall_block` (budgeted read), `flymemory_recall` (ranked search),
+`flymemory_remember`, `flymemory_supersede` (retire a fact), `flymemory_state_lookup`,
+`flymemory_wiki` (current-truth page), `flymemory_organize` (housekeeping),
+`flymemory_vacuum` (shrink), `flymemory_redact` (scrub a secret, keep the audit),
+`flymemory_digest`, `flymemory_clusters`.
+
+## Data layout
 
 ```
-lib/index.js        Host half: port probing, engine supervision, hook config
-bin/flymemory.mjs   CLI built on the same helpers
-cordis.patch.yml    the two rows this bundle inserts
-python/             vendored FlyMemory engine (server, hooks, engine package)
-locale/{en,zh}.json title and description for the Plugins page
-tests/              unit tests, engine smoke test, protocol smoke test
+$DSH_HOME/flymemory-data/
+  flymemory_v3.pkl     the library (single file)
+  usegate.jsonl        injection → use ledger
+  dream.json           optional free-endpoint keys for `dream` (local only)
 ```
-
-## Rough edges
-
-- **The first start takes 15–20 seconds.** That's torch loading. Set
-  `readinessTimeoutMs: 0` if you'd rather the harness start immediately and have
-  the tools appear a few seconds later.
-- **The Python dependencies are heavy.** The plugin won't install them for you;
-  `doctor` tells you what's missing.
-- **DSH has no `PreCompact` hook**, so the recovery pack runs at session start
-  rather than right after a compaction.
-- **Tool names are long.** `mcp__flymemory__flymemory_recall` is what the
-  mcp-client naming rule produces — `mcp__<server>__<tool>` — and it's stable,
-  just not pretty.
-- **One engine per port.** Two harnesses share it; a third instance needs its own
-  port and its own library, set explicitly.
-- **Recall gets slower as the library grows.** Upstream measured ~11 ms per query
-  at about 1,400 entries on CPU.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
-
-The bundled FlyMemory engine is MIT as well, Copyright (c) 2026 Junrong Du.
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) lists exactly which files were
-copied, which were adapted, and why.
+MIT. The engine lives in [aujurd22/flymemory](https://github.com/aujurd22/flymemory); this
+package vendors it under `python/flymemory/` and wires it into the harness.

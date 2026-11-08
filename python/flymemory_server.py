@@ -238,6 +238,7 @@ created before provenance tagging show app=legacy.
 def flymemory_remember(text: str, tags: str = "",
                        compartment: str = "", state_key: str = "",
                        state_value: str = "", app: str = "",
+                       chunk: bool = True,
                        ctx: Context = None) -> str:
     """Store an important finding or decision.
 
@@ -276,7 +277,22 @@ def flymemory_remember(text: str, tags: str = "",
         app_tag = f"app:{app_name}"
         if app_tag not in tag_list:
             tag_list.append(app_tag)
-        result = mem.remember_text(text, tags=tag_list, source="model",
+        if not chunk:
+            # One entry, whole text: a daily playbook or any deliberately composed
+            # finding must not be shredded into one entry per sentence.
+            single = mem.remember(text, tags=tag_list, source="model",
+                                  compartment=compartment or None,
+                                  state_key=state_key or None,
+                                  state_value=state_value or None)
+            ids = single.get("memory_ids") or (
+                [single["memory_id"]] if single.get("memory_id") is not None else [])
+            result = {"action": single.get("action", "new"),
+                      "counts": single.get("counts") or {"new": 1},
+                      "memory_ids": ids,
+                      "reason": single.get("reason", ""),
+                      "novelty": single.get("novelty", 0.0)}
+        else:
+            result = mem.remember_text(text, tags=tag_list, source="model",
                                    compartment=compartment or None,
                                    state_key=state_key or None,
                                    state_value=state_value or None)

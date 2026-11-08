@@ -95,6 +95,7 @@ Rules:
 - redundant: id pairs that state the same fact. Only pairs whose ids are both shown.
 - stale: ids that a newer entry in the digest clearly contradicts. Only ids shown.
 - Empty lists are a good answer. Inventing structure is worse than reporting none.
+- Write every conclusion in the language the entries use.
 """
 
 CLUSTER_SYSTEM = """You are given several memory entries. Decide whether they ALL state
@@ -544,7 +545,8 @@ def reorganize_pass(url=None, apply=False, buckets=8, per_bucket=12,
                         {"query": "每日重排 playbook 宏观结论", "top_k": 5})
     previous_ids = [int(m) for m in re.findall(r"#(\d+)", str(previous))]
     written = mcp_call(url, "flymemory_remember",
-                       {"text": body, "tags": "playbook,daily", "source": "model"})
+                       {"text": body, "tags": "playbook,daily", "source": "model",
+                        "chunk": False})
     match = re.search(r"#(\d+)", str(written))
     if not match:
         print("  playbook write failed: " + str(written)[:100], flush=True)
