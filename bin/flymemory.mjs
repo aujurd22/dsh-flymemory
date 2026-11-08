@@ -405,12 +405,15 @@ function dream() {
   const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'python', 'dream.py')
   const args = [script, '--db', library, '--url', endpoint]
   for (const name of ['--window', '--min-turns', '--compartment', '--model',
-    '--promote', '--shadow-dir', '--merge-limit', '--merge-min-sim']) {
+    '--promote', '--shadow-dir', '--merge-limit', '--merge-min-sim',
+    '--merge-pool', '--cluster-limit', '--cluster-min-sim', '--cluster-pool']) {
     const value = flag(name)
     if (value !== undefined) args.push(name, value)
   }
   if (has('--dry-run')) args.push('--dry-run')
   if (has('--shadow')) args.push('--shadow')
+  if (has('--cluster')) args.push('--cluster')
+  if (has('--cluster-apply')) args.push('--cluster-apply')
   if (has('--merge')) args.push('--merge')
   if (has('--merge-apply')) args.push('--merge-apply')
   if (has('--organize')) args.push('--organize')

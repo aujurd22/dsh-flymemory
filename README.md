@@ -362,6 +362,14 @@ renames a model, the pass asks that provider's `/models` and retries once, so a
 stale name degrades instead of failing. Keys land in `<dataDir>/dream.json`, never
 in the package.
 
+**Folding a whole group (`dream --cluster`).** Pairwise merging cannot converge
+when one fact was written five times: it merges two, then two more, and the copies
+that remain keep coming back. `dream --cluster` asks the model about the whole group
+at once -- one sentence covering every member, or the ids that differ -- and retires
+the originals. The threshold defaults to 0.82 because the library measured 0 shared
+groups at 0.86 and two (correctly rejected) at 0.82: write-time dedup already removes
+most 3-way duplicates, so the pass is a safety net, not the main path.
+
 **Shrinking the file (`vacuum`).** `dsh-flymemory vacuum --older-than 30 [--apply]`
 physically drops entries retired longer ago than the window -- the only operation
 that makes the library smaller. First live run: 20,550 -> 18,256 entries, 71.6 MB ->
