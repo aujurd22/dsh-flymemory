@@ -362,6 +362,16 @@ renames a model, the pass asks that provider's `/models` and retries once, so a
 stale name degrades instead of failing. Keys land in `<dataDir>/dream.json`, never
 in the package.
 
+**Merging with the model (`dream --merge`).** Mechanical housekeeping can only retire
+exact copies and stale state keys; "these two sentences say the same thing" is a
+judgment. `dream --merge` sends near-duplicate pairs to the model, which must answer
+`same`/`different` plus one sentence that keeps every concrete detail. Identical facts
+collapse into one entry (the originals are superseded, never deleted); disagreements
+are left alone and reported with a reason. `--merge-apply` writes; plain `--merge`
+only shows the verdicts. The similarity floor defaults to 0.80 because that is where
+this library actually has candidates -- the highest cosine in any 4,000-entry pool
+measured 0.885, so the old 0.92 could never fire.
+
 **Housekeeping (`organize`).** `dsh-flymemory organize [--apply]` is the garbage-collection
 half of dreaming: two live entries claiming one state key are retired to the newest,
 and byte-identical texts collapse, while near-duplicates and contradictions are only
