@@ -145,6 +145,31 @@ tool loop.
 - **A cheap "profile block"** for preference questions: exactly RAG (37.5%,
   p=1.000). Preference questions still fail everywhere (0-17%).
 
+## Falsified: "few but dense" does not transfer to raw conversation (n=120)
+
+Anthropic's Pokémon result -- ten curated notes beating 413 written files -- invites
+the conclusion that a memory store should keep only its most salient entries. That
+was measured here, with a deterministic salience score (decision/preference markers,
+numbers, length) choosing the best chunks of each session:
+
+| store | strict | prompt tokens/answer |
+|---|---|---|
+| every sentence (current) | **68.3%** | ~1,934 |
+| 8 most salient chunks per session | 46.7% | ~1,511 |
+| 3 most salient chunks per session | 43.3% | ~1,168 |
+
+Paired, exact McNemar: 8-of-session vs all **+5 / -31, p<0.001**; 3-of-session
+**+6 / -36, p<0.001**; 3 vs 8 **p=0.219** (no further loss, the damage is done by the
+first cut). Single-session-user questions collapse from 13/16 to 3/16.
+
+The distinction that matters: a *note* is already a distilled conclusion, so keeping
+few of them keeps the information. A conversation chunk is *evidence*, and which
+chunk answers a question is not knowable at write time. Selection belongs at read
+time -- which is what the budgeted block already does -- not at ingest.
+
+Practical consequence for this project: store raw, distil separately (dream), and
+never let a salience heuristic decide what enters the library.
+
 ## What this supports, and what it does not
 ## What this supports, and what it does not
 

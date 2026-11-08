@@ -319,7 +319,34 @@ def run_extract(question, record, model, memory, budget_chars=6000,
     return answer, 1
 
 
-def build_store_indexed(record):
+def _salience(chunk):
+    """Deterministic "worth keeping" score -- no model call.
+
+    Anthropic's Pokémon result (10 notes beat 413) says fewer, denser memories
+    win. This is the cheap version of that judgment: decisions, preferences and
+    numbers outrank narration.
+    """
+    text = chunk[1] if isinstance(chunk, tuple) else chunk
+    score = 0.0
+    for marker in ("决定", "改成", "改为", "不要", "别用", "偏好", "以后", "记住",
+                   "采用", "结论", "教训", "注意", "重要"):
+        if marker in text:
+            score += 3.0
+    if any(ch.isdigit() for ch in text):
+        score += 2.0
+    if len(text) >= 40:
+        score += 1.0
+    return score
+
+
+def _cap_chunks(chunks, cap):
+    """Keep the `cap` most salient chunks of one session, in original order."""
+    indexed = list(enumerate(chunks))
+    keep = {i for i, _chunk in sorted(indexed, key=lambda kv: -_salience(kv[1]))[:cap]}
+    return [chunk for i, chunk in indexed if i in keep]
+
+
+def build_store_indexed(record, per_session_cap=None):
     """Sentence-level store that also remembers which session each entry came from.
 
     That mapping is what makes a two-level read possible without a schema change:
@@ -345,10 +372,13 @@ def build_store_indexed(record):
             parts.append(f"{role}: {content}")
             for chunk in split_chunks(f"[{date_text}] {role}: {content}"):
                 chunk_log.append((stamp, chunk))
-                result = memory.remember(text=chunk, source="import", timestamp=stamp)
-                memory_id = result.get("memory_id")
-                if memory_id is not None:
-                    id_to_session[memory_id] = index
+        if per_session_cap:
+            chunk_log = _cap_chunks(chunk_log, per_session_cap)
+        for stamp, chunk in chunk_log:
+            result = memory.remember(text=chunk, source="import", timestamp=stamp)
+            memory_id = result.get("memory_id")
+            if memory_id is not None:
+                id_to_session[memory_id] = index
         session_texts[index] = (date_text, "\n".join(parts))
         session_chunks[index] = chunk_log
     return memory, id_to_session, session_texts, session_chunks
@@ -404,10 +434,11 @@ def ask_extract(model, question, record, context):
 
 
 def twolevel_context(record, question, budget_chars=6000, per_entry_chars=900,
-                     topk=25, parents=3, fine_share=0.6, parent_max_entries=None):
+                     topk=25, parents=3, fine_share=0.6, parent_max_entries=None,
+                     per_session_cap=None):
     """The context that experiment B validated: sentence hits plus their sessions."""
     from recall_block import pack
-    built = build_store_indexed(record)
+    built = build_store_indexed(record, per_session_cap=per_session_cap)
     store, id_to_session, session_texts = built[0], built[1], built[2]
     session_chunks = built[3] if len(built) > 3 else {}
     hits = store.recall(question, top_k=topk)
@@ -453,6 +484,12 @@ def run_twolevel_capped(question, record, model, memory, budget_chars=6000,
     context = twolevel_context(record, question, budget_chars=budget_chars,
                                parent_max_entries=parent_max_entries)
     return ask_with_context(model, question, record, context), 0
+
+
+def run_cap_extract(question, record, model, memory, cap=3):
+    """The production recipe over a distilled, few-but-dense store."""
+    context = twolevel_context(record, question, per_session_cap=cap)
+    return ask_extract(model, question, record, context), 0
 
 
 def run_twolevel_extract(question, record, model, memory, budget_chars=6000):
@@ -850,6 +887,9 @@ def main():
                 answer, rounds = run_bm25rec_extract(question, record, clients[arm], memory)
             elif arm == "bm25rec":
                 answer, rounds = run_bm25rec(question, record, clients[arm], memory)
+            elif arm.startswith("cap") and arm.endswith("-extract"):
+                answer, rounds = run_cap_extract(question, record, clients[arm],
+                                                 memory, cap=int(arm[3:-8]))
             elif arm == "twolevel-capped-extract":
                 answer, rounds = run_twolevel_capped_extract(question, record,
                                                              clients[arm], memory)
