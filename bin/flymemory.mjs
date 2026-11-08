@@ -453,6 +453,14 @@ async function redact() {
   process.exit(text.startsWith('[REDACTED]') ? 0 : 1)
 }
 
+/** Physically drop entries retired longer ago than the window (shrinks the file). */
+async function vacuum() {
+  const days = Number(flag('--older-than') || 30)
+  const text = await mcpTool(liveEndpoint(), 'flymemory_vacuum',
+    { older_than_days: days, apply: has('--apply') })
+  console.log(text)
+}
+
 /** Housekeeping: retire what a newer entry has already replaced. */
 async function organize() {
   const text = await mcpTool(liveEndpoint(), 'flymemory_organize',
@@ -477,7 +485,7 @@ async function wiki() {
   }
 }
 
-const commands = { status, start, stop, log: logCommand, doctor, mute, unmute: mute, ledger, version: versionCommand, dream, redact, wiki, organize }
+const commands = { status, start, stop, log: logCommand, doctor, mute, unmute: mute, ledger, version: versionCommand, dream, redact, wiki, organize, vacuum }
 const run = commands[command]
 if (!run) {
   console.error(`unknown command "${command}"\n\nusage: dsh-flymemory [status|start|stop|log|doctor|mute|ledger|version] [--port N] [--data-dir DIR] [--python PATH]`)

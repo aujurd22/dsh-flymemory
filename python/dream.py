@@ -294,7 +294,7 @@ def audit_entry(source_turns, entry):
     return bool(decision.get("supported")), "; ".join(decision.get("unsupported_claims", [])[:2])
 
 
-def merge_pass(url=None, limit=8, min_sim=0.80, apply=False, chat=None):
+def merge_pass(url=None, limit=8, min_sim=0.80, apply=False, chat=None, pool=2000):
     """Ask the model which near-duplicate pairs are actually one fact.
 
     Mechanical organize can only retire exact copies and stale state keys. ``merge``
@@ -302,8 +302,25 @@ def merge_pass(url=None, limit=8, min_sim=0.80, apply=False, chat=None):
     that keeps every detail, or says they differ (in which case nothing is touched).
     """
     call = chat or llm_chat
+    # Rotate a persisted cursor so successive runs walk the WHOLE library: one
+    # pass over 20k entries is an O(n^2) scan, a 2k window per run is cheap.
+    cursor_path = pathlib.Path(os.environ.get("FLYMEMORY_MERGE_CURSOR",
+                                              os.path.join(os.environ.get("TEMP", "."),
+                                                           "flymemory-merge-cursor.json")))
+    cursor = 0
+    try:
+        cursor = int(json.loads(cursor_path.read_text(encoding="utf-8")).get("offset", 0))
+    except Exception:                        # noqa: BLE001 - first run
+        cursor = 0
     raw = mcp_call(url, "flymemory_conflict_pairs",
-                   {"min_sim": min_sim, "limit": max(1, int(limit))})
+                   {"min_sim": min_sim, "limit": max(1, int(limit)),
+                    "pool_limit": max(100, int(pool)), "offset": cursor})
+    if pool:
+        try:
+            cursor_path.parent.mkdir(parents=True, exist_ok=True)
+            cursor_path.write_text(json.dumps({"offset": cursor + int(pool)}), encoding="utf-8")
+        except Exception:                    # noqa: BLE001 - cursor is best effort
+            pass
     try:
         pairs = json.loads(raw) if raw.strip().startswith("[") else []
     except json.JSONDecodeError:
@@ -372,6 +389,8 @@ def main():
                         help="write the merged entries and retire the originals")
     parser.add_argument("--merge-limit", type=int, default=8,
                         help="how many candidate pairs to review")
+    parser.add_argument("--merge-pool", type=int, default=2000,
+                        help="how many entries to scan per run (rotates over the library)")
     parser.add_argument("--merge-min-sim", type=float, default=0.80,
                         help="similarity floor for a candidate pair")
     parser.add_argument("--organize", action="store_true",
@@ -391,7 +410,8 @@ def main():
         return _promote(args)
 
     if args.merge:
-        return merge_pass(args.url, args.merge_limit, args.merge_min_sim, args.merge_apply)
+        return merge_pass(args.url, args.merge_limit, args.merge_min_sim,
+                          args.merge_apply, pool=args.merge_pool)
 
     if args.organize or args.organize_apply:
         print(mcp_call(args.url, "flymemory_organize",

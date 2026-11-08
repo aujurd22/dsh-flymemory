@@ -362,6 +362,12 @@ renames a model, the pass asks that provider's `/models` and retries once, so a
 stale name degrades instead of failing. Keys land in `<dataDir>/dream.json`, never
 in the package.
 
+**Shrinking the file (`vacuum`).** `dsh-flymemory vacuum --older-than 30 [--apply]`
+physically drops entries retired longer ago than the window -- the only operation
+that makes the library smaller. First live run: 20,550 -> 18,256 entries, 71.6 MB ->
+63.6 MB, with every entry retired inside the window kept so a recent rollback is
+still possible.
+
 **Merging with the model (`dream --merge`).** Mechanical housekeeping can only retire
 exact copies and stale state keys; "these two sentences say the same thing" is a
 judgment. `dream --merge` sends near-duplicate pairs to the model, which must answer
