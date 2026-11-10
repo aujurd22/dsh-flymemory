@@ -1,6 +1,6 @@
 {
   "name": "dsh-flymemory",
-  "version": "1.9.9",
+  "version": "1.9.10",
   "description": "Structural long-term memory for DeepSeek Harness: supersede, decay and entity state across 23 MCP tools, automatic recall/capture hooks, a local single-file library, and a daily cleanup pass (merge, shrink, redact).",
   "type": "module",
   "main": "lib/index.js",
