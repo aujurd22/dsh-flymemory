@@ -18,12 +18,25 @@ This one also solves "stop believing the old version".
 
 ## Try it
 
+Three ways in, same plugin:
+
 ```bash
-npm i dsh-flymemory          # once; the memory service comes up with the harness
+npm i dsh-flymemory          # command line, always the newest version
+```
+
+- **Inside DSH**: sidebar → Plugins → Market → search `flymemory` → install.
+  (The market index syncs once a day, so a release from today may still show
+  yesterday's number; `npm i dsh-flymemory@latest` gets it immediately.)
+- **Web**: the listing on [dsh-plugin.org](https://dsh-plugin.org/plugins/aujurd22/dsh-flymemory)
+  and [awesome-dsh-plugin.com](https://awesome-dsh-plugin.com/p/aujurd22/dsh-flymemory/).
+
+Then check it:
+
+```bash
 dsh-flymemory status         # is it running, where is the library, what is in it
 ```
 
-Then in DSH just ask something you discussed in another session. If it answers with
+And in DSH just ask something you discussed in another session. If it answers with
 context you didn't give it, it's working.
 
 Two things happen on install:

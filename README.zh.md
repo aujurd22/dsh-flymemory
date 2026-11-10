@@ -17,12 +17,25 @@
 
 ## 试一下
 
+三种装法，装的是同一个插件：
+
 ```bash
-npm i dsh-flymemory          # 装一次，记忆服务跟着 harness 起来
+npm i dsh-flymemory          # 命令行，永远是最新版
+```
+
+- **在 DSH 里**：侧栏 → 插件 → 市场 → 搜 `flymemory` → 安装。
+  （市场索引每天同步一次，今天的版本可能明天才显示；想立刻拿到最新版就用
+  `npm i dsh-flymemory@latest`。）
+- **网页**：[dsh-plugin.org](https://dsh-plugin.org/plugins/aujurd22/dsh-flymemory) 和
+  [awesome-dsh-plugin.com](https://awesome-dsh-plugin.com/p/aujurd22/dsh-flymemory/) 都有条目。
+
+装完先看状态：
+
+```bash
 dsh-flymemory status         # 在不在跑、库在哪、里面有多少条
 ```
 
-装完在 DSH 里问一个"你昨天那个对话里说过的事"。如果它能接上你没交代的上下文，就是通了。
+然后在 DSH 里问一个"你昨天那个对话里说过的事"。如果它能接上你没交代的上下文，就是通了。
 
 装的时候有两件事会慢一次：
 
