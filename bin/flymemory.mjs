@@ -370,9 +370,13 @@ function dream() {
   const harnessCredentials = join(homedir(), '.dsh', '.credentials.yaml')
   if (existsSync(harnessCredentials)) {
     try {
+      // Only the keys dream can use: handing the child the whole credential store
+      // (ACT, platform grants, every unrelated token) is what dsh.so finding #9
+      // flagged. Anything else stays in the parent.
+      const usable = new Set(Object.values(KEY_ENV))
       for (const line of readFileSync(harnessCredentials, 'utf8').split('\n')) {
         const match = line.match(/^\s*([A-Z0-9_]+):\s*(\S+)\s*$/)
-        if (match && !env[match[1]]) env[match[1]] = match[2]
+        if (match && usable.has(match[1]) && !env[match[1]]) env[match[1]] = match[2]
       }
     } catch { /* unreadable credentials: fall back to the environment */ }
   }

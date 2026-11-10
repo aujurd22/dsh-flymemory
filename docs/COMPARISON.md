@@ -65,6 +65,22 @@ n=150:
 - the oracle-split advantage of full context **reverses** when history is long:
   76.7% -> 45.3%, while the tool protocol only moves 56.7% -> 52.0%.
 
+## mem0 as a raw store (n=120)
+
+The README quotes "58.3% vs 56.7%" as a tie; this is where that comes from. Same 120
+questions as every other arm, mem0 in its `infer=False` mode (store the text, retrieve
+by embedding), against our three-round tool protocol measured in the same sweep:
+
+| arm | strict | note |
+|---|---|---|
+| mem0 (`infer=False`) | **58.3%** (70/120) | no LLM at write time |
+| our agentic 3 rounds | **56.7%** | same sweep, paired by question id |
+
+They are within noise of each other -- a tie, not a win. mem0's *paid* mode
+(`infer=True`, an LLM extracting facts at write time) is the separate n=40 experiment
+below, which it wins on average but not reliably: two runs of the same 40 questions
+scored 55.0% and 65.0%.
+
 ## mem0 with its extraction pipeline (n=40, metered)
 
 mem0's default `infer=True` runs an LLM over each ingested batch to extract facts.
